@@ -86,15 +86,12 @@ For detailed instructions or alternative deployment methods, see our **[Deployme
    cd cursor-claude-connector
    ```
 
-2. **Set up Upstash Redis**
-
-   - Create a free Redis database at [Upstash Console](https://console.upstash.com/)
-   - Copy your REST URL and REST Token
-   - Copy `env.example` to `.env` and update with your values:
+2. **Configure environment**
 
    ```bash
    cp env.example .env
-   # Edit .env with your Upstash credentials
+   # For local use: no Redis needed, tokens are stored in .auth/credentials.json
+   # For Vercel: add UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN
    ```
 
 3. **Run the start script**

@@ -1,4 +1,5 @@
 import { Redis } from '@upstash/redis'
+import * as fileStorage from './file-storage'
 
 interface OAuthCredentials {
   type: 'oauth'
@@ -17,18 +18,26 @@ interface TokenResponse {
   expires_in: number
 }
 
-// Initialize Redis client
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL || '',
-  token: process.env.UPSTASH_REDIS_REST_TOKEN || '',
-})
+// Use file storage (.auth/credentials.json) when Redis is not configured
+// Set UPSTASH_REDIS_REST_URL to use Redis (required for Vercel deployment)
+const useFileStorage = !process.env.UPSTASH_REDIS_REST_URL?.trim()
+if (useFileStorage) {
+  console.log('📁 Using local file storage (.auth/credentials.json)')
+}
 
-// Redis key for auth data
+const redis = useFileStorage
+  ? null
+  : new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL || '',
+      token: process.env.UPSTASH_REDIS_REST_TOKEN || '',
+    })
+
 const AUTH_KEY = 'auth:anthropic'
 
 async function get(): Promise<OAuthCredentials | null> {
+  if (useFileStorage) return fileStorage.get()
   try {
-    const data = await redis.get<OAuthCredentials>(AUTH_KEY)
+    const data = await redis!.get<OAuthCredentials>(AUTH_KEY)
     return data
   } catch (error) {
     console.error('Error getting auth from Redis:', error)
@@ -37,8 +46,9 @@ async function get(): Promise<OAuthCredentials | null> {
 }
 
 async function set(credentials: OAuthCredentials): Promise<boolean> {
+  if (useFileStorage) return fileStorage.set(credentials)
   try {
-    await redis.set(AUTH_KEY, credentials)
+    await redis!.set(AUTH_KEY, credentials)
     return true
   } catch (error) {
     console.error('Error saving auth to Redis:', error)
@@ -47,8 +57,9 @@ async function set(credentials: OAuthCredentials): Promise<boolean> {
 }
 
 async function remove(): Promise<boolean> {
+  if (useFileStorage) return fileStorage.remove()
   try {
-    await redis.del(AUTH_KEY)
+    await redis!.del(AUTH_KEY)
     return true
   } catch (error) {
     console.error('Error removing auth from Redis:', error)
@@ -57,11 +68,10 @@ async function remove(): Promise<boolean> {
 }
 
 async function getAll(): Promise<AuthData> {
+  if (useFileStorage) return fileStorage.getAll()
   try {
-    const credentials = await redis.get<OAuthCredentials>(AUTH_KEY)
-    if (credentials) {
-      return { anthropic: credentials }
-    }
+    const credentials = await redis!.get<OAuthCredentials>(AUTH_KEY)
+    if (credentials) return { anthropic: credentials }
     return {}
   } catch (error) {
     console.error('Error getting all auth from Redis:', error)

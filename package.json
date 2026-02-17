@@ -6,10 +6,11 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/server.ts",
-    "start": "node dist/server.js",
+    "start": "node --env-file=.env dist/server.js",
     "start:dev": "tsx watch src/server.ts",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
+    "kill-port": "lsof -ti:9095 | xargs kill 2>/dev/null || echo 'No process on port 9095'",
     "vercel-build": "npm run build"
   },
   "keywords": [
@@ -28,6 +29,7 @@
   "author": "Maol-1997",
   "license": "MIT",
   "dependencies": {
+    "@hono/node-server": "^1.19.9",
     "@upstash/redis": "^1.35.1",
     "hono": "^4.8.3"
   },
