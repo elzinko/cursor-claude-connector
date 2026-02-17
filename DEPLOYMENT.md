@@ -8,72 +8,83 @@ This guide will help you connect Cursor with your Claude subscription using this
 2. **Cursor IDE** installed on your local machine
 3. **GitHub account** (for Vercel deployment)
 
-## 🚀 Deployment Options
+## 🔀 Two modes
 
-### Option 1: Deploy to Vercel (Recommended) ⚡
+| Mode | Storage | When to use |
+|------|---------|-------------|
+| **Local** | File `.auth/credentials.json` | Dev on one machine, maximum security |
+| **Vercel** | Redis (Upstash) | Multi-device access, no PC required |
 
-The easiest way to get started is with our one-click Vercel deployment:
+> On Vercel (serverless), file storage doesn't persist between requests. Redis is required.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/Maol-1997/cursor-claude-connector&integration-ids=oac_V3R1GIpkoJorr6fqyiwdhl17)
+---
 
-#### What happens when you click:
+## ☁️ Option 1: Deploy to Vercel
 
-1. **Fork the repository** - Vercel will create a copy in your GitHub account
-2. **Create Upstash Redis** - Automatically provisions a free Redis database
-3. **Configure environment** - All variables are set up automatically
-4. **Deploy the app** - Your proxy will be live in under 2 minutes!
+### One-click deploy
 
-#### After deployment:
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/Maol-1997/cursor-claude-connector&env=API_KEY&integration-ids=oac_V3R1GIpkoJorr6fqyiwdhl17)
 
-1. Note your deployment URL (e.g., `https://your-app-name.vercel.app`)
-2. Visit `https://your-app-name.vercel.app/` to authenticate with Claude
-3. Configure Cursor with: `https://your-app-name.vercel.app/v1`
+1. Set `API_KEY` when prompted (required for public URL)
+2. Add Redis via Marketplace (see below)
+3. Redeploy to apply environment variables
 
-### Option 2: Manual Server Deployment
+### Add Redis via Vercel Marketplace (recommended, free tier)
 
-If you prefer to deploy on your own server:
+> **Vercel KV** was discontinued in December 2024. Use **Upstash Redis** from the [Vercel Marketplace](https://vercel.com/marketplace?category=storage&search=redis) — same REST API, **free tier** included (256 MB storage, 500K commands/month).
 
-#### 1. Install Bun
+**Step-by-step:**
+
+1. Open your project on [Vercel Dashboard](https://vercel.com/dashboard)
+2. Go to the **Storage** tab
+3. Click **Connect Store** → **Browse Marketplace**
+4. Search for **Redis** → Select **[Upstash](https://vercel.com/marketplace/upstash)**
+5. Click **Add Integration** → Create new database or link existing
+6. Credentials (`UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`) are auto-injected
+7. **Redeploy** your project for env vars to take effect
+
+### Manual Redis setup
+
+1. Create a database at [Upstash Console](https://console.upstash.com/)
+2. Add these variables to Vercel (Settings → Environment Variables):
+   - `UPSTASH_REDIS_REST_URL`
+   - `UPSTASH_REDIS_REST_TOKEN`
+   - `API_KEY` (required for public URL)
+   - `CORS_ORIGINS` (your Vercel URL)
+
+### After deployment
+
+1. Visit `https://your-app.vercel.app/` to authenticate
+2. Configure Cursor: Base URL `https://your-app.vercel.app/v1` + API Key
+
+---
+
+## 💻 Option 2: Local or VPS server
+
+### Local mode (no Redis)
 
 ```bash
-# Install Bun
-curl -fsSL https://bun.sh/install | bash
-source ~/.bashrc
-```
-
-#### 2. Clone and configure
-
-```bash
-# Clone the repository
 git clone https://github.com/Maol-1997/cursor-claude-connector.git
 cd cursor-claude-connector
-
-# Set up environment variables
 cp env.example .env
-# Edit .env with your Upstash Redis credentials
+npm run start:local
+# or: ./start.sh local
 ```
 
-#### 3. Set up Upstash Redis
+### Server mode (with Redis)
 
-1. Create a free account at [Upstash Console](https://console.upstash.com/)
-2. Create a new Redis database
-3. Copy the REST URL and REST Token to your `.env` file
+For a VPS or testing Vercel mode locally:
 
-#### 4. Start the server
+1. Add `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` to `.env`
+2. Run `npm run start:vercel` or `./start.sh vercel`
 
-```bash
-# Run the start script (default port: 9095)
-./start.sh
+### Start scripts
 
-# Or with a custom port:
-PORT=3000 ./start.sh
-```
-
-The script will:
-
-- Install dependencies automatically
-- Build the project
-- Start the server on your specified port
+| Script | Command | Storage |
+|--------|---------|---------|
+| `npm run start:local` | `./start.sh local` | File (`.auth/`) |
+| `npm run start:vercel` | `./start.sh vercel` | Redis (requires env) |
+| `npm run start` | `./start.sh` | Auto-detect |
 
 ## 🔐 Claude Authentication
 

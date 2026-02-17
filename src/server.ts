@@ -40,6 +40,21 @@ app.options('*', corsPreflightHandler)
 app.use('*', corsMiddleware)
 
 const indexHtmlPath = join(process.cwd(), 'public', 'index.html')
+
+function logConnectionInfo(context?: string) {
+  const port = process.env.PORT || 9095
+  const baseUrl = `http://localhost:${port}/v1`
+  const apiKey = process.env.API_KEY
+  const apiKeyDisplay = apiKey
+    ? `${apiKey.slice(0, 4)}${'*'.repeat(Math.min(apiKey.length - 4, 8))}`
+    : '(not set)'
+  const prefix = context ? `✅ ${context}` : '📋 Cursor configuration'
+  console.log(`\n${prefix} :`)
+  console.log('   Base URL :', baseUrl)
+  console.log('   API Key :', apiKeyDisplay)
+  console.log('   → Settings → Models → Override OpenAI Base URL')
+  console.log('')
+}
 let cachedIndexHtml: string | null = null
 
 const getIndexHtml = async () => {
@@ -103,6 +118,8 @@ app.post('/auth/oauth/callback', async (c: Context) => {
     const verifier = sessionId || splits[1] || ''
 
     await handleOAuthCallback(codeOnly, verifier)
+
+    logConnectionInfo('Authentication successful')
 
     return c.json<SuccessResponse>({
       success: true,
@@ -444,8 +461,10 @@ const port = Number(process.env.PORT || 9095)
 // Start local HTTP server when run directly with Node (not when imported for Vercel)
 if (require.main === module) {
   const server = createAdaptorServer({ fetch: app.fetch })
-  server.listen(port, () => {
+  server.listen(port, async () => {
     console.log(`Listening on http://localhost:${port}`)
+    const token = await getAccessToken()
+    if (token) logConnectionInfo('Already authenticated')
   })
 
   const shutdown = () => {

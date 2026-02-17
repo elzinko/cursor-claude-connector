@@ -56,60 +56,79 @@ graph LR
     B -->|Full Context| A
 ```
 
-## 🚀 Quick Installation
+## 🚀 Two modes
 
-### 🔥 One-Click Deploy to Vercel
+| Mode | Storage | Use case |
+|------|---------|----------|
+| **Local** | File `.auth/credentials.json` | Single machine, maximum security |
+| **Vercel** | Redis (Upstash) | Multi-device, access without your PC on |
 
-Deploy instantly with Upstash Redis integration:
+> **Why Redis on Vercel?** In serverless, each request can be handled by a different instance. File storage doesn't persist. Add Upstash Redis via [Vercel Marketplace](https://vercel.com/marketplace?category=storage&search=redis) — it auto-injects credentials.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/Maol-1997/cursor-claude-connector&env=API_KEY&envDescription=Custom%20optional%20key%20for%20enhanced%20security%20protection&envLink=https://github.com/Maol-1997/cursor-claude-connector%23api-key&integration-ids=oac_V3R1GIpkoJorr6fqyiwdhl17)
+---
 
-<!-- The integration-ids parameter includes Upstash's official Vercel integration ID for automatic Redis setup -->
+## 📍 Local mode (recommended for dev)
 
-This will:
+No external setup. Tokens are stored in `.auth/credentials.json`.
 
-- ✅ Deploy the proxy to Vercel
-- ✅ Automatically create an Upstash Redis database
-- ✅ Configure all environment variables (including optional API_KEY)
-- ✅ Get you running in under 2 minutes!
-
-### 📖 Manual Setup Guide
-
-For detailed instructions or alternative deployment methods, see our **[Deployment Guide](DEPLOYMENT.md)**.
-
-### Local Development
-
-1. **Clone the repository**
+1. **Clone and configure**
 
    ```bash
    git clone https://github.com/Maol-1997/cursor-claude-connector.git
    cd cursor-claude-connector
-   ```
-
-2. **Configure environment**
-
-   ```bash
    cp env.example .env
-   # For local use: no Redis needed, tokens are stored in .auth/credentials.json
-   # For Vercel: add UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN
+   # Don't configure Redis → file storage is used automatically
    ```
 
-3. **Run the start script**
+2. **Run**
 
    ```bash
-   ./start.sh
+   npm run start:local
+   # or: ./start.sh local
+   # or: ./start.sh   (auto-detect)
    ```
 
-4. **Authenticate with Claude**
+3. **Authenticate** → Open `http://localhost:9095/`
 
-   - Open `http://localhost:9095/` in your browser
-   - Follow the authentication process
+4. **Configure Cursor** → Base URL: `http://localhost:9095/v1`
 
-5. **Configure Cursor**
-   - Go to Settings → Models
-   - Enable "Override OpenAI Base URL"
-   - Enter: `http://localhost:9095/v1` (for local) or `https://your-app.vercel.app/v1` (for Vercel)
-   - If you set an API_KEY during deployment, add it to your API key field in Cursor
+---
+
+## ☁️ Vercel mode (multi-device)
+
+Public URL, accessible without your PC on. **Redis required** — add via Vercel Marketplace.
+
+### One-click deploy
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/Maol-1997/cursor-claude-connector&env=API_KEY&envDescription=API%20key%20to%20secure%20the%20proxy&envLink=https://github.com/Maol-1997/cursor-claude-connector%23api-key&integration-ids=oac_V3R1GIpkoJorr6fqyiwdhl17)
+
+1. Vercel will clone the repo and prompt for `API_KEY` (required for public URL)
+2. **Add Redis:** Go to your project → Storage → Connect Redis → Add [Upstash](https://vercel.com/marketplace/upstash) from Marketplace
+3. The integration auto-injects `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`
+4. Redeploy if needed
+
+### Manual Redis setup
+
+If you prefer to configure Redis yourself:
+
+1. Create a database at [Upstash Console](https://console.upstash.com/)
+2. Add to Vercel environment variables:
+   - `UPSTASH_REDIS_REST_URL`
+   - `UPSTASH_REDIS_REST_TOKEN`
+   - `API_KEY`
+   - `CORS_ORIGINS` = your Vercel URL
+
+### Add Redis via Vercel Marketplace (free tier)
+
+> **Note:** Vercel KV was discontinued (Dec 2024). Use **Upstash Redis** from the Marketplace — same API, **free tier** (256 MB, 500K commands/month).
+
+1. Open your Vercel project → **Storage** tab
+2. Click **Connect Store** → Browse Marketplace
+3. Select **[Upstash Redis](https://vercel.com/marketplace/upstash)** → Add Integration
+4. Create a new database or link existing — credentials are auto-injected
+5. Redeploy your project
+
+See the **[Deployment Guide](DEPLOYMENT.md)** for details.
 
 ## 🎉 Advantages of this solution
 
@@ -122,21 +141,16 @@ For detailed instructions or alternative deployment methods, see our **[Deployme
 | Development Extensions  | ❌         | ❌          | ✅ IDE Ecosystem        |
 | Cost                    | Claude Max | Claude Max  | Claude Max Only         |
 
-## 🔐 API Key (Optional)
+## 🔐 API Key
 
-You can optionally set an `API_KEY` environment variable for additional security:
-
-- If set, Cursor must provide this key in the API key field
-- Adds an extra layer of authentication to your proxy
-- Useful when deploying to public URLs
-- Leave empty to use without additional authentication
+- **Local:** optional (proxy is not exposed)
+- **Vercel:** strongly recommended, required for a public URL
 
 ## 🛡️ Security
 
-- Uses your existing Claude session for authentication
-- Optional API key for additional security
-- Local connection between Cursor and the proxy
-- Open source code for auditing
+- OAuth authentication with Claude
+- **Local:** tokens in `.auth/` (gitignored), no network exposure
+- **Vercel:** API_KEY required, CORS restricted, tokens in Redis
 
 ## 🤝 Contributions
 
