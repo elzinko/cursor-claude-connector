@@ -1,5 +1,5 @@
 import { Hono, Context } from 'hono'
-import { serve } from '@hono/node-server'
+import { createAdaptorServer } from '@hono/node-server'
 import { stream } from 'hono/streaming'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -443,9 +443,23 @@ const port = Number(process.env.PORT || 9095)
 
 // Start local HTTP server when run directly with Node (not when imported for Vercel)
 if (require.main === module) {
-  serve({ fetch: app.fetch, port }, (info: { port: number }) => {
-    console.log(`Listening on http://localhost:${info.port}`)
+  const server = createAdaptorServer({ fetch: app.fetch })
+  server.listen(port, () => {
+    console.log(`Listening on http://localhost:${port}`)
   })
+
+  const shutdown = () => {
+    console.log('\nShutting down...')
+    server.close(() => {
+      console.log('Server closed')
+      process.exit(0)
+    })
+    // Force exit after 3s if connections are hanging
+    setTimeout(() => process.exit(0), 3000)
+  }
+
+  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', shutdown)
 }
 
 // Export app for Vercel
