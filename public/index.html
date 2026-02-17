@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Claude OAuth Authentication</title>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+      :root {
+        --background: 48 33.3333% 97.0588%;
+        --foreground: 48 19.6078% 20%;
+        --card: 48 33.3333% 97.0588%;
+        --card-foreground: 60 2.5641% 7.6471%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 50.7692 19.403% 13.1373%;
+        --primary: 15.1111 55.5556% 52.3529%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 46.1538 22.807% 88.8235%;
+        --secondary-foreground: 50.7692 8.4967% 30%;
+        --muted: 44 29.4118% 90%;
+        --muted-foreground: 50 2.3622% 50.1961%;
+        --accent: 46.1538 22.807% 88.8235%;
+        --accent-foreground: 50.7692 19.403% 13.1373%;
+        --destructive: 60 2.5641% 7.6471%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 50 7.5% 84.3137%;
+        --input: 50.7692 7.9755% 68.0392%;
+        --ring: 210 74.8031% 49.8039%;
+        --radius: 0.5rem;
+        --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.1),
+          0 1px 2px -1px hsl(0 0% 0% / 0.1);
+        --shadow: 0 1px 3px 0px hsl(0 0% 0% / 0.1),
+          0 1px 2px -1px hsl(0 0% 0% / 0.1);
+        --shadow-md: 0 1px 3px 0px hsl(0 0% 0% / 0.1),
+          0 2px 4px -1px hsl(0 0% 0% / 0.1);
+        --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --background: 60 2.7027% 14.5098%;
+          --foreground: 46.1538 9.7744% 73.9216%;
+          --card: 60 2.7027% 14.5098%;
+          --card-foreground: 48 33.3333% 97.0588%;
+          --popover: 60 2.1277% 18.4314%;
+          --popover-foreground: 60 5.4545% 89.2157%;
+          --primary: 14.7692 63.1068% 59.6078%;
+          --primary-foreground: 0 0% 100%;
+          --secondary: 48 33.3333% 97.0588%;
+          --secondary-foreground: 60 2.1277% 18.4314%;
+          --muted: 60 3.8462% 10.1961%;
+          --muted-foreground: 51.4286 8.8608% 69.0196%;
+          --accent: 48 10.6383% 9.2157%;
+          --accent-foreground: 51.4286 25.9259% 94.7059%;
+          --destructive: 0 84.2365% 60.1961%;
+          --destructive-foreground: 0 0% 100%;
+          --border: 60 5.0847% 23.1373%;
+          --input: 52.5 5.1282% 30.5882%;
+          --ring: 210 74.8031% 49.8039%;
+        }
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: var(--font-sans);
+        background: hsl(var(--background));
+        color: hsl(var(--foreground));
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1rem;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+
+      .container {
+        background: hsl(var(--card));
+        border: 1px solid hsl(var(--border));
+        border-radius: var(--radius);
+        box-shadow: var(--shadow-sm);
+        padding: 2rem;
+        max-width: 28rem;
+        width: 100%;
+      }
+
+      h1 {
+        color: hsl(var(--card-foreground));
+        margin-bottom: 0.5rem;
+        font-size: 1.5rem;
+        font-weight: 600;
+        letter-spacing: -0.025em;
+      }
+
+      .subtitle {
+        color: hsl(var(--muted-foreground));
+        margin-bottom: 2rem;
+        font-size: 0.875rem;
+        line-height: 1.5;
+      }
+
+      .status {
+        background: hsl(var(--muted));
+        color: hsl(var(--muted-foreground));
+        border-radius: calc(var(--radius) - 2px);
+        padding: 0.75rem 1rem;
+        margin-bottom: 1.5rem;
+        font-size: 0.875rem;
+        text-align: center;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+      }
+
+      .status i {
+        width: 16px;
+        height: 16px;
+      }
+
+      .status.authenticated {
+        background: hsl(var(--primary) / 0.1);
+        color: hsl(var(--primary));
+        border: 1px solid hsl(var(--primary) / 0.2);
+      }
+
+      .status.error {
+        background: hsl(var(--destructive) / 0.1);
+        color: hsl(var(--destructive));
+        border: 1px solid hsl(var(--destructive) / 0.2);
+      }
+
+      .button-primary {
+        background: hsl(var(--primary));
+        color: hsl(var(--primary-foreground));
+        border: none;
+        border-radius: calc(var(--radius) - 2px);
+        padding: 0.625rem 1rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+        width: 100%;
+        transition: all 150ms ease;
+        margin-bottom: 1rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+      }
+
+      .button-primary i {
+        width: 16px;
+        height: 16px;
+      }
+
+      .button-primary:hover {
+        background: hsl(var(--primary) / 0.9);
+        transform: translateY(-1px);
+      }
+
+      .button-primary:active {
+        transform: translateY(0);
+      }
+
+      .button-primary:disabled {
+        background: hsl(var(--muted));
+        color: hsl(var(--muted-foreground));
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .button-secondary {
+        background: transparent;
+        color: hsl(var(--foreground));
+        border: 1px solid hsl(var(--border));
+        border-radius: calc(var(--radius) - 2px);
+        padding: 0.625rem 1rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+        width: 100%;
+        transition: all 150ms ease;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+      }
+
+      .button-secondary i {
+        width: 16px;
+        height: 16px;
+      }
+
+      .button-secondary:hover {
+        background: hsl(var(--accent));
+        border-color: hsl(var(--accent));
+      }
+
+      .manual-section {
+        animation: slideDown 200ms ease-out;
+      }
+
+      @keyframes slideDown {
+        from {
+          opacity: 0;
+          transform: translateY(-10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .input-group {
+        margin-bottom: 1rem;
+      }
+
+      .input-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        color: hsl(var(--foreground));
+        font-weight: 500;
+        font-size: 0.875rem;
+      }
+
+      .input-group input {
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        background: hsl(var(--background));
+        border: 1px solid hsl(var(--input));
+        border-radius: calc(var(--radius) - 2px);
+        font-size: 0.875rem;
+        color: hsl(var(--foreground));
+        transition: all 150ms ease;
+      }
+
+      .input-group input:focus {
+        outline: none;
+        border-color: hsl(var(--ring));
+        box-shadow: 0 0 0 3px hsl(var(--ring) / 0.2);
+      }
+
+      .input-group input::placeholder {
+        color: hsl(var(--muted-foreground));
+      }
+
+      .help-text {
+        font-size: 0.75rem;
+        color: hsl(var(--muted-foreground));
+        margin-top: 0.5rem;
+        line-height: 1.5;
+      }
+
+      .loading {
+        display: inline-block;
+        width: 1rem;
+        height: 1rem;
+        border: 2px solid hsl(var(--primary-foreground) / 0.3);
+        border-radius: 50%;
+        border-top-color: hsl(var(--primary-foreground));
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .success-icon {
+        color: hsl(var(--primary));
+        font-size: 3rem;
+        text-align: center;
+        margin-bottom: 1rem;
+        line-height: 1;
+        display: flex;
+        justify-content: center;
+      }
+
+      .success-icon i {
+        width: 48px;
+        height: 48px;
+      }
+
+      .error-message {
+        background: hsl(var(--destructive) / 0.1);
+        border: 1px solid hsl(var(--destructive) / 0.2);
+        border-radius: calc(var(--radius) - 2px);
+        padding: 0.75rem 1rem;
+        margin-bottom: 1rem;
+        color: hsl(var(--destructive));
+        font-size: 0.875rem;
+        line-height: 1.5;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .error-message i {
+        width: 16px;
+        height: 16px;
+        flex-shrink: 0;
+      }
+
+      .authenticated-content {
+        text-align: center;
+      }
+
+      .authenticated-content p {
+        color: hsl(var(--muted-foreground));
+        margin-bottom: 1.5rem;
+        font-size: 0.875rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Claude OAuth Authentication</h1>
+      <p class="subtitle">
+        Connect your Claude account to use the API through this proxy
+      </p>
+
+      <div id="status" class="status">
+        <i data-lucide="loader-2" class="loading"></i>
+        Checking authentication status...
+      </div>
+
+      <div id="authenticatedView" style="display: none">
+        <div class="authenticated-content">
+          <p>You are successfully authenticated with Claude</p>
+          <button class="button-secondary" onclick="logout()">
+            <i data-lucide="log-out"></i>
+            Sign Out
+          </button>
+        </div>
+      </div>
+
+      <div id="unauthenticatedView" style="display: none">
+        <button id="startAuthBtn" class="button-primary" onclick="startAuth()">
+          <i data-lucide="key-round"></i>
+          <span id="btnText">Connect with Claude</span>
+        </button>
+
+        <div id="manualSection" class="manual-section">
+          <form onsubmit="submitCode(event)">
+            <div class="input-group">
+              <label for="authCode">Authorization Code</label>
+              <input
+                type="text"
+                id="authCode"
+                placeholder="Paste your OAuth code here"
+                required
+              />
+              <p class="help-text">
+                After authenticating with Claude, copy the entire code from the
+                redirect URL and paste it here.
+              </p>
+            </div>
+            <button type="submit" class="button-primary">
+              <i data-lucide="check"></i>
+              Submit Code
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <div id="errorMessage" class="error-message" style="display: none">
+        <i data-lucide="alert-circle"></i>
+        <span id="errorText"></span>
+      </div>
+    </div>
+
+    <script>
+      // Initialize Lucide icons
+      lucide.createIcons()
+
+      let authWindow = null
+      let authCheckInterval = null
+
+      async function checkAuthStatus() {
+        try {
+          const response = await fetch('/auth/status')
+          const data = await response.json()
+
+          const statusEl = document.getElementById('status')
+          const authView = document.getElementById('authenticatedView')
+          const unauthView = document.getElementById('unauthenticatedView')
+
+          if (data.authenticated) {
+            statusEl.className = 'status authenticated'
+            statusEl.innerHTML = '<i data-lucide="check"></i> Authenticated'
+            authView.style.display = 'block'
+            unauthView.style.display = 'none'
+          } else {
+            statusEl.className = 'status'
+            statusEl.innerHTML = '<i data-lucide="x"></i> Not authenticated'
+            authView.style.display = 'none'
+            unauthView.style.display = 'block'
+          }
+
+          // Re-initialize icons after updating content
+          lucide.createIcons()
+        } catch (error) {
+          console.error('Failed to check auth status:', error)
+          showError('Failed to check authentication status')
+        }
+      }
+
+      async function startAuth() {
+        const btn = document.getElementById('startAuthBtn')
+        const btnText = document.getElementById('btnText')
+
+        btn.disabled = true
+        btnText.innerHTML = '<span class="loading"></span>Connecting...'
+
+        try {
+          const response = await fetch('/auth/oauth/start', {
+            method: 'POST',
+          })
+
+          const data = await response.json()
+
+          if (data.authUrl) {
+            // Open auth window
+            authWindow = window.open(
+              data.authUrl,
+              'claude-auth',
+              'width=600,height=700',
+            )
+
+            // Start checking for completion
+            authCheckInterval = setInterval(async () => {
+              if (authWindow && authWindow.closed) {
+                clearInterval(authCheckInterval)
+                btn.disabled = false
+                btnText.innerHTML = 'Connect with Claude'
+                await checkAuthStatus()
+              }
+            }, 1000)
+
+            btnText.innerHTML =
+              '<i data-lucide="external-link" style="width: 16px; height: 16px;"></i> Waiting for authentication...'
+            lucide.createIcons()
+          } else {
+            throw new Error('No auth URL received')
+          }
+        } catch (error) {
+          console.error('Failed to start auth:', error)
+          showError('Failed to start authentication')
+          btn.disabled = false
+          btnText.innerHTML = 'Connect with Claude'
+        }
+      }
+
+      async function submitCode(event) {
+        event.preventDefault()
+
+        const codeInput = document.getElementById('authCode')
+        const code = codeInput.value.trim()
+
+        if (!code) {
+          showError('Please enter a valid OAuth code')
+          return
+        }
+
+        try {
+          const response = await fetch('/auth/oauth/callback', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ code }),
+          })
+
+          const data = await response.json()
+
+          if (data.success) {
+            codeInput.value = ''
+            await checkAuthStatus()
+          } else {
+            showError(data.message || 'Authentication failed')
+          }
+        } catch (error) {
+          console.error('Failed to submit code:', error)
+          showError('Failed to submit OAuth code')
+        }
+      }
+
+      async function logout() {
+        try {
+          const response = await fetch('/auth/logout')
+          const data = await response.json()
+
+          if (data.success) {
+            await checkAuthStatus()
+          } else {
+            showError('Failed to logout')
+          }
+        } catch (error) {
+          console.error('Failed to logout:', error)
+          showError('Failed to logout')
+        }
+      }
+
+      function showError(message) {
+        const errorEl = document.getElementById('errorMessage')
+        const errorText = document.getElementById('errorText')
+        errorText.textContent = message
+        errorEl.style.display = 'flex'
+
+        setTimeout(() => {
+          errorEl.style.display = 'none'
+        }, 5000)
+      }
+
+      // Check auth status on load
+      checkAuthStatus()
+
+      // Listen for messages from auth window
+      window.addEventListener('message', async (event) => {
+        if (
+          event.data &&
+          event.data.type === 'oauth-callback' &&
+          event.data.code
+        ) {
+          // Submit the code automatically
+          document.getElementById('authCode').value = event.data.code
+          await submitCode({ preventDefault: () => {} })
+
+          // Close the auth window
+          if (authWindow && !authWindow.closed) {
+            authWindow.close()
+          }
+        }
+      })
+    </script>
+  </body>
+</html>
