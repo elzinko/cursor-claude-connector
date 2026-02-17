@@ -84,7 +84,7 @@ app.post('/auth/oauth/start', async (c: Context) => {
 app.post('/auth/oauth/callback', async (c: Context) => {
   try {
     const body = await c.req.json()
-    const { code } = body
+    const { code, sessionId } = body
 
     if (!code) {
       return c.json<ErrorResponse>(
@@ -96,11 +96,12 @@ app.post('/auth/oauth/callback', async (c: Context) => {
       )
     }
 
-    // Extract verifier from code if it contains #
+    // Use sessionId (PKCE verifier) from client, or extract from code#verifier format
     const splits = code.split('#')
-    const verifier = splits[1] || ''
+    const codeOnly = splits[0]
+    const verifier = sessionId || splits[1] || ''
 
-    await handleOAuthCallback(code, verifier)
+    await handleOAuthCallback(codeOnly, verifier)
 
     return c.json<SuccessResponse>({
       success: true,
@@ -140,7 +141,7 @@ app.post('/auth/login/start', async (c: Context) => {
   }
 })
 
-app.get('/auth/logout', async (c: Context) => {
+app.post('/auth/logout', async (c: Context) => {
   try {
     await oauthLogout()
     return c.json<SuccessResponse>({
@@ -235,15 +236,18 @@ const messagesFn = async (c: Context) => {
   const body: AnthropicRequestBody = await c.req.json()
   const isStreaming = body.stream === true
 
-  const apiKey = c.req.header('authorization')?.split(' ')?.[1]
-  if (apiKey && apiKey !== process.env.API_KEY) {
-    return c.json(
-      {
-        error: 'Authentication required',
-        message: 'Please authenticate use the API key from the .env file',
-      },
-      401,
-    )
+  // When API_KEY is set, require it for all requests
+  if (process.env.API_KEY) {
+    const apiKey = c.req.header('authorization')?.split(' ')?.[1]
+    if (!apiKey || apiKey !== process.env.API_KEY) {
+      return c.json(
+        {
+          error: 'Authentication required',
+          message: 'Please provide the API key from your .env file',
+        },
+        401,
+      )
+    }
   }
 
   // Bypass cursor enable openai key check

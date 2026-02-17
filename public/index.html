@@ -382,6 +382,7 @@
 
       let authWindow = null
       let authCheckInterval = null
+      let currentSessionId = null
 
       async function checkAuthStatus() {
         try {
@@ -427,6 +428,7 @@
           const data = await response.json()
 
           if (data.authUrl) {
+            currentSessionId = data.sessionId
             // Open auth window
             authWindow = window.open(
               data.authUrl,
@@ -470,12 +472,13 @@
         }
 
         try {
+          const body = { code, ...(currentSessionId && { sessionId: currentSessionId }) }
           const response = await fetch('/auth/oauth/callback', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ code }),
+            body: JSON.stringify(body),
           })
 
           const data = await response.json()
@@ -494,7 +497,7 @@
 
       async function logout() {
         try {
-          const response = await fetch('/auth/logout')
+          const response = await fetch('/auth/logout', { method: 'POST' })
           const data = await response.json()
 
           if (data.success) {
