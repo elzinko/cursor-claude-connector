@@ -192,10 +192,11 @@ test_model() {
     "  -> Response missing OpenAI choices format"
 }
 
-test_model "claude-sonnet-4-6-20250514" "Sonnet 4.6 (Cursor name)"
-test_model "claude-sonnet-4-20250514"   "Sonnet 4 (native name)"
-test_model "claude-3-5-sonnet-20241022" "Sonnet 3.5 legacy"
-test_model "claude-3-7-sonnet-20250219" "Sonnet 3.7 legacy"
+test_model "claude-sonnet-4-6-20250514" "Sonnet 4.6 (Cursor name -> claude-sonnet-4-6)"
+test_model "claude-sonnet-4-6"          "Sonnet 4.6 (native name)"
+test_model "claude-sonnet-4-20250514"   "Sonnet 4.0 (native name)"
+test_model "claude-3-5-sonnet-20241022" "Sonnet 3.5 legacy -> Sonnet 4.6"
+test_model "claude-3-7-sonnet-20250219" "Sonnet 3.7 legacy -> Sonnet 4.6"
 
 # =============================================================================
 # 5. OpenAI format conversion (non-streaming)

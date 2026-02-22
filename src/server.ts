@@ -59,8 +59,12 @@ function logConnectionInfo(context?: string) {
   const prefix = context ? `✅ ${context}` : '📋 Cursor configuration'
   console.log(`\n${prefix} :`)
   console.log('   Base URL :', baseUrl)
-  console.log('   API Key :', apiKeyDisplay)
-  console.log('   → Settings → Models → Override OpenAI Base URL')
+  console.log('   API Key  :', apiKeyDisplay)
+  console.log('')
+  console.log('   Cursor setup (Settings → Models):')
+  console.log('   1. ✅ Enable  "OpenAI API Key" and paste your API_KEY from .env')
+  console.log(`   2. ✅ Set     "Override OpenAI Base URL" to ${baseUrl}`)
+  console.log('   3. ❌ Disable "Anthropic API Key" (leave empty)')
   console.log('')
 }
 let cachedIndexHtml: string | null = null
@@ -259,27 +263,43 @@ app.get('/v1/models', async (c: Context) => {
   }
 })
 
-// Map model names sent by Cursor/IDEs to actual Anthropic OAuth API model IDs.
-// The OAuth API (Pro/Max subscription) uses different model IDs than the paid API.
-// e.g. Cursor sends "claude-sonnet-4-6-20250514" but OAuth expects "claude-sonnet-4-20250514"
+// Map model names sent by Cursor/IDEs to actual Anthropic API model IDs.
+// Cursor fabricates non-standard IDs (e.g. appending old snapshot dates).
+// The official Anthropic API IDs for 4.6 models have NO date suffix.
+// See: https://docs.anthropic.com/en/docs/about-claude/models
 function mapModelName(model: string): string {
-  // Direct mappings for known mismatches
   const MODEL_MAP: Record<string, string> = {
-    // Claude 4.6 models (Cursor names) -> OAuth API names
-    'claude-sonnet-4-6-20250514': 'claude-sonnet-4-20250514',
-    'claude-opus-4-6-20250514': 'claude-opus-4-20250514',
-    // Claude 4.5 models
-    'claude-sonnet-4-5-20241022': 'claude-sonnet-4-20250514',
-    'claude-opus-4-5-20241022': 'claude-opus-4-20250514',
-    // Latest aliases
-    'claude-3-5-sonnet-latest': 'claude-sonnet-4-20250514',
-    'claude-3-5-sonnet-20241022': 'claude-sonnet-4-20250514',
-    'claude-3-7-sonnet-20250219': 'claude-sonnet-4-20250514',
-    'claude-3-7-sonnet-latest': 'claude-sonnet-4-20250514',
-    'claude-sonnet-latest': 'claude-sonnet-4-20250514',
-    'claude-opus-latest': 'claude-opus-4-20250514',
-    'claude-3-5-haiku-20241022': 'claude-3-haiku-20240307',
-    'claude-3-5-haiku-latest': 'claude-3-haiku-20240307',
+    // ── Claude 4.6 (latest) ──────────────────────────────────────────
+    // Cursor appends the old 4.0 snapshot date "20250514" which is wrong.
+    // Official 4.6 IDs are just "claude-sonnet-4-6" / "claude-opus-4-6".
+    'claude-sonnet-4-6-20250514': 'claude-sonnet-4-6',
+    'claude-opus-4-6-20250514':   'claude-opus-4-6',
+
+    // ── Claude 4.5 ──────────────────────────────────────────────────
+    'claude-sonnet-4-5-20250929': 'claude-sonnet-4-5-20250929',  // passthrough (valid)
+    'claude-opus-4-5-20251101':   'claude-opus-4-5-20251101',    // passthrough (valid)
+    'claude-sonnet-4-5-20241022': 'claude-sonnet-4-5-20250929',  // Cursor may send wrong date
+    'claude-opus-4-5-20241022':   'claude-opus-4-5-20251101',    // Cursor may send wrong date
+
+    // ── Claude 4.0 ──────────────────────────────────────────────────
+    'claude-sonnet-4-20250514':   'claude-sonnet-4-20250514',    // passthrough (valid)
+    'claude-opus-4-20250514':     'claude-opus-4-20250514',      // passthrough (valid)
+
+    // ── Legacy 3.x aliases → map to closest current model ───────────
+    'claude-3-5-sonnet-latest':   'claude-sonnet-4-6',
+    'claude-3-5-sonnet-20241022': 'claude-sonnet-4-6',
+    'claude-3-7-sonnet-20250219': 'claude-sonnet-4-6',
+    'claude-3-7-sonnet-latest':   'claude-sonnet-4-6',
+
+    // ── "latest" aliases ────────────────────────────────────────────
+    'claude-sonnet-latest':       'claude-sonnet-4-6',
+    'claude-opus-latest':         'claude-opus-4-6',
+
+    // ── Haiku ───────────────────────────────────────────────────────
+    'claude-haiku-4-5-20251001':  'claude-haiku-4-5-20251001',   // passthrough (valid)
+    'claude-3-5-haiku-20241022':  'claude-haiku-4-5-20251001',
+    'claude-3-5-haiku-latest':    'claude-haiku-4-5-20251001',
+    'claude-3-haiku-20240307':    'claude-3-haiku-20240307',     // passthrough (valid)
   }
 
   if (MODEL_MAP[model]) {
