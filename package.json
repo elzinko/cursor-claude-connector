@@ -5,14 +5,14 @@
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
-    "dev": "tsx src/server.ts",
+    "dev": "tsx --env-file=.env src/server.ts",
     "start": "node --env-file=.env dist/server.js",
     "start:local": "./start.sh local",
     "start:vercel": "./start.sh vercel",
-    "start:dev": "tsx watch src/server.ts",
+    "start:dev": "tsx watch --env-file=.env src/server.ts",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
-    "kill-port": "lsof -ti:9095 | xargs kill 2>/dev/null || echo 'No process on port 9095'",
+    "stop": "lsof -ti:9095 | xargs kill 2>/dev/null || echo 'No process on port 9095'",
     "vercel-build": "npm run build"
   },
   "keywords": [

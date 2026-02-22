@@ -1,5 +1,13 @@
 import { Hono, Context } from 'hono'
 import { createAdaptorServer } from '@hono/node-server'
+import {
+  logger,
+  extractProjectFromApiKey,
+  logRequest,
+} from './middleware/request-logger'
+import { rateLimiter } from './middleware/rate-limiter'
+import { printStatusline } from './utils/statusline'
+import { statsRouter } from './routes/stats'
 import { stream } from 'hono/streaming'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -74,6 +82,9 @@ app.get('/index.html', async (c) => {
   const html = await getIndexHtml()
   return c.html(html)
 })
+
+// Stats API
+app.route('/api/stats', statsRouter)
 
 // New OAuth start endpoint for UI
 app.post('/auth/oauth/start', async (c: Context) => {
@@ -248,6 +259,37 @@ app.get('/v1/models', async (c: Context) => {
   }
 })
 
+// Map model names sent by Cursor/IDEs to actual Anthropic OAuth API model IDs.
+// The OAuth API (Pro/Max subscription) uses different model IDs than the paid API.
+// e.g. Cursor sends "claude-sonnet-4-6-20250514" but OAuth expects "claude-sonnet-4-20250514"
+function mapModelName(model: string): string {
+  // Direct mappings for known mismatches
+  const MODEL_MAP: Record<string, string> = {
+    // Claude 4.6 models (Cursor names) -> OAuth API names
+    'claude-sonnet-4-6-20250514': 'claude-sonnet-4-20250514',
+    'claude-opus-4-6-20250514': 'claude-opus-4-20250514',
+    // Claude 4.5 models
+    'claude-sonnet-4-5-20241022': 'claude-sonnet-4-20250514',
+    'claude-opus-4-5-20241022': 'claude-opus-4-20250514',
+    // Latest aliases
+    'claude-3-5-sonnet-latest': 'claude-sonnet-4-20250514',
+    'claude-3-5-sonnet-20241022': 'claude-sonnet-4-20250514',
+    'claude-3-7-sonnet-20250219': 'claude-sonnet-4-20250514',
+    'claude-3-7-sonnet-latest': 'claude-sonnet-4-20250514',
+    'claude-sonnet-latest': 'claude-sonnet-4-20250514',
+    'claude-opus-latest': 'claude-opus-4-20250514',
+    'claude-3-5-haiku-20241022': 'claude-3-haiku-20240307',
+    'claude-3-5-haiku-latest': 'claude-3-haiku-20240307',
+  }
+
+  if (MODEL_MAP[model]) {
+    console.log(`[PROXY] Model mapped: ${model} -> ${MODEL_MAP[model]}`)
+    return MODEL_MAP[model]
+  }
+
+  return model
+}
+
 // Anthropic Messages API only accepts these top-level fields.
 // Any extra fields (from OpenAI format) cause a 400 error.
 const ANTHROPIC_ALLOWED_FIELDS = new Set([
@@ -267,25 +309,69 @@ function sanitizeBodyForAnthropic(body: Record<string, unknown>): Record<string,
 }
 
 const messagesFn = async (c: Context) => {
+  const startTime = Date.now()
   const body: AnthropicRequestBody = await c.req.json()
   const isStreaming = body.stream === true
 
+  // Map model name to OAuth-compatible ID
+  body.model = mapModelName(body.model)
+
   console.log(`[PROXY] ${c.req.path} model=${body.model} stream=${isStreaming}`)
 
-  // When API_KEY is set, require it for all requests
-  if (process.env.API_KEY) {
-    const apiKey = c.req.header('authorization')?.split(' ')?.[1]
-    if (!apiKey || apiKey !== process.env.API_KEY) {
+  // API Key validation - supports multiple keys (comma-separated in API_KEY)
+  // In production (Vercel), API_KEY is required for security
+  const providedKey = c.req.header('authorization')?.split(' ')?.[1]
+  const allowedKeys = process.env.API_KEY?.split(',').map((k) => k.trim()) || []
+  const isProduction = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production'
+
+  // Require API_KEY in production/Vercel for security
+  if (isProduction && allowedKeys.length === 0) {
+    console.error('⚠️  SECURITY WARNING: API_KEY is required in production but not set!')
+    return c.json(
+      {
+        error: 'Configuration error',
+        message: 'API_KEY must be configured in production environment',
+      },
+      500,
+    )
+  }
+
+  if (allowedKeys.length > 0) {
+    if (!providedKey || !allowedKeys.includes(providedKey)) {
       console.log('[PROXY] Rejected: invalid API key')
       return c.json(
         {
           error: 'Authentication required',
-          message: 'Please provide the API key from your .env file',
+          message: 'Please provide a valid API key',
         },
         401,
       )
     }
   }
+
+  const apiKey = providedKey || 'default'
+  const project = extractProjectFromApiKey(apiKey)
+
+  // Rate limiting check
+  const rateCheck = rateLimiter.check(project)
+  if (!rateCheck.allowed) {
+    const resetIn = Math.ceil((rateCheck.resetAt - Date.now()) / 1000 / 60)
+    const rateStats = rateLimiter.getStats(project)
+    console.log(
+      `[${project}] RATE LIMIT | ${rateStats.count}/${rateStats.limit} requests | Reset in ${resetIn}m`,
+    )
+    return c.json(
+      {
+        error: 'Rate limit exceeded',
+        message: `Too many requests for project "${project}". Try again in ${resetIn} minutes.`,
+        resetAt: new Date(rateCheck.resetAt).toISOString(),
+      },
+      429,
+    )
+  }
+
+  // Log incoming request
+  console.log(`[${project}] ${body.model || 'unknown'} | REQUEST START`)
 
   // Bypass cursor enable openai key check
   if (isCursorKeyCheck(body)) {
@@ -383,6 +469,21 @@ const messagesFn = async (c: Context) => {
       const error = await response.text()
       console.error('API Error:', error)
 
+      // Log error response
+      try {
+        const errorData = JSON.parse(error)
+        const errorResponse: AnthropicResponse = {
+          type: 'error',
+          error: errorData.error || { type: 'api_error', message: error },
+        }
+        logRequest(c, apiKey, body.model, startTime, errorResponse, response.status)
+      } catch {
+        // If error is not JSON, log anyway
+        console.log(
+          `[${project}] ${body.model} | ERROR | ${Date.now() - startTime}ms | ${response.status}`,
+        )
+      }
+
       if (response.status === 401) {
         return c.json<ErrorResponse>(
           {
@@ -456,6 +557,9 @@ const messagesFn = async (c: Context) => {
     } else {
       const responseData = (await response.json()) as AnthropicResponse
 
+      // Log request (non-streaming only for now)
+      logRequest(c, apiKey, body.model, startTime, responseData, response.status)
+
       if (transformToOpenAIFormat) {
         const openAIResponse = convertNonStreamingResponse(responseData)
 
@@ -476,6 +580,11 @@ const messagesFn = async (c: Context) => {
 
       return c.json(responseData)
     }
+
+    // Log streaming requests (basic info, tokens not available until end)
+    console.log(
+      `[${project}] ${body.model} | STREAMING | ${Date.now() - startTime}ms | 200`,
+    )
   } catch (error) {
     console.error('Proxy error:', error)
     return c.json<ErrorResponse>(
@@ -497,6 +606,24 @@ if (require.main === module) {
     console.log(`Listening on http://localhost:${port}`)
     const token = await getAccessToken()
     if (token) logConnectionInfo('Already authenticated')
+
+    // Print statusline every 5 seconds
+    setInterval(() => {
+      const stats = logger.getStats()
+      if (stats.totalRequests > 0) {
+        console.log('\n' + '─'.repeat(80))
+        console.log(
+          `📊 Stats: ${stats.totalRequests} requests | ` +
+            `${stats.totalTokens.toLocaleString()} tokens | ` +
+            `$${stats.totalCost.toFixed(4)} | ` +
+            `${stats.requestsLastHour} req/h`,
+        )
+        if (stats.projects.length > 1) {
+          console.log(`   Projects: ${stats.projects.join(', ')}`)
+        }
+        console.log('─'.repeat(80))
+      }
+    }, 5000)
   })
 
   const shutdown = () => {

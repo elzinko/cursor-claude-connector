@@ -40,7 +40,11 @@ export const corsPreflightHandler = (c: Context) => {
     'Access-Control-Allow-Methods',
     'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD',
   )
-  c.header('Access-Control-Allow-Headers', '*')
+  // Restrict allowed headers for security (allow common API headers)
+  c.header(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, X-Requested-With, Accept, Origin',
+  )
   c.header('Access-Control-Allow-Credentials', 'true')
   c.header('Access-Control-Max-Age', '86400')
 
@@ -57,6 +61,10 @@ export const corsMiddleware = async (c: Context, next: () => Promise<void>) => {
     'Access-Control-Allow-Methods',
     'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD',
   )
-  c.header('Access-Control-Allow-Headers', '*')
+  // Restrict allowed headers for security (allow common API headers)
+  c.header(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, X-Requested-With, Accept, Origin',
+  )
   c.header('Access-Control-Allow-Credentials', 'true')
 }
