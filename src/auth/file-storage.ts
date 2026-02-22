@@ -12,12 +12,31 @@ const AUTH_DIR = '.auth'
 const AUTH_FILE = 'credentials.json'
 const AUTH_KEY = 'anthropic'
 
+// Resolve auth path relative to the project root (where package.json is),
+// not process.cwd() which can differ in worktrees or other launch contexts.
+function getProjectRoot(): string {
+  // __dirname points to the compiled file's directory (dist/auth/ or src/auth/)
+  // Go up to find the project root (where .auth/ lives)
+  let dir = __dirname
+  const { dirname } = require('node:path')
+  const { existsSync } = require('node:fs')
+  // Walk up until we find package.json (project root)
+  for (let i = 0; i < 10; i++) {
+    if (existsSync(join(dir, 'package.json'))) return dir
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  // Fallback to cwd
+  return process.cwd()
+}
+
 function getAuthPath(): string {
-  return join(process.cwd(), AUTH_DIR, AUTH_FILE)
+  return join(getProjectRoot(), AUTH_DIR, AUTH_FILE)
 }
 
 async function ensureAuthDir(): Promise<void> {
-  await mkdir(AUTH_DIR, { recursive: true })
+  await mkdir(join(getProjectRoot(), AUTH_DIR), { recursive: true })
 }
 
 export async function get(): Promise<OAuthCredentials | null> {

@@ -248,16 +248,35 @@ app.get('/v1/models', async (c: Context) => {
   }
 })
 
+// Anthropic Messages API only accepts these top-level fields.
+// Any extra fields (from OpenAI format) cause a 400 error.
+const ANTHROPIC_ALLOWED_FIELDS = new Set([
+  'model', 'messages', 'system', 'max_tokens', 'metadata',
+  'stop_sequences', 'stream', 'temperature', 'top_p', 'top_k',
+  'tools', 'tool_choice',
+])
+
+function sanitizeBodyForAnthropic(body: Record<string, unknown>): Record<string, unknown> {
+  const clean: Record<string, unknown> = {}
+  for (const key of Object.keys(body)) {
+    if (ANTHROPIC_ALLOWED_FIELDS.has(key)) {
+      clean[key] = body[key]
+    }
+  }
+  return clean
+}
+
 const messagesFn = async (c: Context) => {
-  let headers: Record<string, string> = c.req.header() as Record<string, string>
-  headers.host = 'api.anthropic.com'
   const body: AnthropicRequestBody = await c.req.json()
   const isStreaming = body.stream === true
+
+  console.log(`[PROXY] ${c.req.path} model=${body.model} stream=${isStreaming}`)
 
   // When API_KEY is set, require it for all requests
   if (process.env.API_KEY) {
     const apiKey = c.req.header('authorization')?.split(' ')?.[1]
     if (!apiKey || apiKey !== process.env.API_KEY) {
+      console.log('[PROXY] Rejected: invalid API key')
       return c.json(
         {
           error: 'Authentication required',
@@ -270,6 +289,7 @@ const messagesFn = async (c: Context) => {
 
   // Bypass cursor enable openai key check
   if (isCursorKeyCheck(body)) {
+    console.log('[PROXY] Cursor key validation detected, sending bypass response')
     return c.json(createCursorBypassResponse())
   }
 
@@ -299,17 +319,24 @@ const messagesFn = async (c: Context) => {
         })
       }
 
-      if (body.model.includes('opus')) {
-        body.max_tokens = 32_000
-      }
-      if (body.model.includes('sonnet')) {
-        body.max_tokens = 64_000
+      // Anthropic API requires max_tokens. Set sensible defaults per model family.
+      if (!body.max_tokens) {
+        const model = body.model.toLowerCase()
+        if (model.includes('opus')) {
+          body.max_tokens = 32_000
+        } else if (model.includes('haiku')) {
+          body.max_tokens = 8_192
+        } else {
+          // Default for sonnet and any other/future model
+          body.max_tokens = 64_000
+        }
       }
     }
 
     const oauthToken = await getAccessToken()
 
     if (!oauthToken) {
+      console.log('[PROXY] No OAuth token found')
       return c.json<ErrorResponse>(
         {
           error: 'Authentication required',
@@ -320,7 +347,7 @@ const messagesFn = async (c: Context) => {
       )
     }
 
-    headers = {
+    const headers: Record<string, string> = {
       'content-type': 'application/json',
       authorization: `Bearer ${oauthToken}`,
       'anthropic-beta':
@@ -341,10 +368,15 @@ const messagesFn = async (c: Context) => {
       }
     }
 
+    // Remove OpenAI-only fields that Anthropic doesn't understand (causes 400)
+    const cleanBody = sanitizeBodyForAnthropic(body as Record<string, unknown>)
+
+    console.log(`[PROXY] -> Anthropic: model=${cleanBody.model} max_tokens=${cleanBody.max_tokens} transform=${transformToOpenAIFormat}`)
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers,
-      body: JSON.stringify(body),
+      body: JSON.stringify(cleanBody),
     })
 
     if (!response.ok) {

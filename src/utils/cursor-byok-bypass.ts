@@ -40,14 +40,16 @@ export function createCursorBypassResponse() {
   }
 }
 
-// Check if the request is from Cursor trying to validate OpenAI key
+// Check if the request is from Cursor trying to validate OpenAI key.
+// Must be strict to avoid intercepting legitimate Claude requests.
 export function isCursorKeyCheck(body: AnthropicRequestBody): boolean {
-  return (
-    body.model?.includes('gpt-4o') ||
-    (body.messages &&
-      body.messages.some(
-        (m: any) =>
-          m.content === 'Test prompt using gpt-3.5-turbo',
-      ))
-  ) || false
+  const isGPTModel = body.model?.startsWith('gpt-')
+  const isTestPrompt = body.messages?.some(
+    (m: any) =>
+      typeof m.content === 'string' &&
+      (m.content === 'Test prompt using gpt-3.5-turbo' ||
+       m.content === 'Say "hi" to confirm the connection is working.'),
+  )
+  // Only bypass if it's clearly a GPT model validation request
+  return (isGPTModel && body.messages?.length === 1) || isTestPrompt || false
 }
