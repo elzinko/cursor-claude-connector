@@ -274,19 +274,27 @@ app.get('/v1/models', async (c: Context) => {
 })
 
 // ── Model Aliases ─────────────────────────────────────────────────────
-// Cursor routes Claude model names through its own backend, bypassing
-// the custom Base URL. Using a non-Anthropic model name (e.g. deepseek-coder)
-// forces Cursor to send the request to OUR proxy instead.
+// Cursor intercepts well-known model names (deepseek-v3, gpt-4o, etc.)
+// and routes them to its OWN backend instead of the custom Base URL.
+// Solution: use completely invented model names that Cursor doesn't
+// recognize — it will then forward them to the custom Base URL.
+// In Cursor Settings > Models, add one of these as a custom model:
+//   "claude-proxy-opus"  → maps to claude-opus-4-6
+//   "claude-proxy"       → maps to claude-sonnet-4-6
 const MODEL_ALIASES: Record<string, string> = {
-  // DeepSeek aliases — Cursor routes these through custom Base URL
-  // (use deepseek-v3 or deepseek-r1 in Cursor: accepted but NOT handled by Cursor's own backend)
+  // ── Recommended: invented names Cursor cannot intercept ──────────
+  'claude-proxy-opus':    'claude-opus-4-6',
+  'claude-proxy-sonnet':  'claude-sonnet-4-6',
+  'claude-proxy':         'claude-sonnet-4-6',
+  'claude-proxy-haiku':   'claude-haiku-4-5-20251001',
+  // ── DeepSeek names (Cursor may intercept → deepseek.com) ────────
   'deepseek-v3':          'claude-opus-4-6',
   'deepseek-r1':          'claude-opus-4-6',
   'deepseek-v3-sonnet':   'claude-sonnet-4-6',
   'deepseek-coder':       'claude-opus-4-6',
   'deepseek-chat':        'claude-sonnet-4-6',
   'deepseek-reasoner':    'claude-sonnet-4-6',
-  // OpenAI-style aliases (Cursor may intercept these and use its own backend)
+  // ── OpenAI names (Cursor intercepts → Cursor own backend) ───────
   'gpt-4o':               'claude-opus-4-6',
   'gpt-4o-mini':          'claude-sonnet-4-6',
   'gpt-4-turbo':          'claude-opus-4-6',
@@ -595,6 +603,10 @@ const messagesFn = async (c: Context) => {
       delete (body as any).top_k
     }
 
+    // Forward X-Routing-Group if Cursor sent it — undocumented header that
+    // significantly improves routing success rate through Cursor's backend
+    const routingGroup = c.req.header('x-routing-group')
+
     const headers: Record<string, string> = {
       'content-type': 'application/json',
       authorization: `Bearer ${oauthToken}`,
@@ -604,6 +616,7 @@ const messagesFn = async (c: Context) => {
       'user-agent': '@anthropic-ai/sdk 1.2.12 node/22.13.1',
       accept: isStreaming ? 'text/event-stream' : 'application/json',
       'accept-encoding': 'gzip, deflate',
+      ...(routingGroup ? { 'x-routing-group': routingGroup } : {}),
     }
 
     if (transformToOpenAIFormat) {
