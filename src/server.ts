@@ -283,10 +283,16 @@ app.get('/v1/models', async (c: Context) => {
 //   "claude-proxy"       → maps to claude-sonnet-4-6
 const MODEL_ALIASES: Record<string, string> = {
   // ── Recommended: invented names Cursor cannot intercept ──────────
-  'claude-proxy-opus':    'claude-opus-4-6',
-  'claude-proxy-sonnet':  'claude-sonnet-4-6',
-  'claude-proxy':         'claude-sonnet-4-6',
-  'claude-proxy-haiku':   'claude-haiku-4-5-20251001',
+  // Add these in Cursor Settings > Models as custom model names
+  'claude-proxy-opus':        'claude-opus-4-6',
+  'claude-proxy-opus-4.6':    'claude-opus-4-6',
+  'claude-proxy-opus-4.5':    'claude-opus-4-5-20251101',
+  'claude-proxy-sonnet':      'claude-sonnet-4-6',
+  'claude-proxy-sonnet-4.6':  'claude-sonnet-4-6',
+  'claude-proxy-sonnet-4.5':  'claude-sonnet-4-5-20250929',
+  'claude-proxy-haiku':       'claude-haiku-4-5-20251001',
+  'claude-proxy-haiku-4.5':   'claude-haiku-4-5-20251001',
+  'claude-proxy':             'claude-sonnet-4-6',
   // ── DeepSeek names (Cursor may intercept → deepseek.com) ────────
   'deepseek-v3':          'claude-opus-4-6',
   'deepseek-r1':          'claude-opus-4-6',
