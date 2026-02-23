@@ -108,6 +108,7 @@ async function refreshToken(
           refresh_token: credentials.refresh,
           client_id: CLIENT_ID,
         }),
+        signal: AbortSignal.timeout(30_000), // 30s timeout for token refresh
       },
     )
 

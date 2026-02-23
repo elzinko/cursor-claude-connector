@@ -74,7 +74,7 @@ No external setup. Tokens are stored in `.auth/credentials.json`.
 1. **Clone and configure**
 
    ```bash
-   git clone https://github.com/Maol-1997/cursor-claude-connector.git
+   git clone https://github.com/elzinko/cursor-claude-connector.git
    cd cursor-claude-connector
    cp env.example .env
    # Don't configure Redis → file storage is used automatically
@@ -100,7 +100,7 @@ Public URL, accessible without your PC on. **Redis required** — add via Vercel
 
 ### One-click deploy
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/Maol-1997/cursor-claude-connector&env=API_KEY&envDescription=API%20key%20to%20secure%20the%20proxy&envLink=https://github.com/Maol-1997/cursor-claude-connector%23api-key&integration-ids=oac_V3R1GIpkoJorr6fqyiwdhl17)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/elzinko/cursor-claude-connector&env=API_KEY&envDescription=API%20key%20to%20secure%20the%20proxy&envLink=https://github.com/elzinko/cursor-claude-connector%23api-key&integration-ids=oac_V3R1GIpkoJorr6fqyiwdhl17)
 
 1. Vercel will clone the repo and prompt for `API_KEY` (required for public URL)
 2. **Add Redis:** Go to your project → Storage → Connect Redis → Add [Upstash](https://vercel.com/marketplace/upstash) from Marketplace

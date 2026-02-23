@@ -14,10 +14,11 @@ interface AnthropicMessage {
 }
 
 interface AnthropicContentBlock {
-  type: 'text' | 'tool_use'
+  type: 'text' | 'tool_use' | 'thinking'
   id?: string
   name?: string
   text?: string
+  thinking?: string
   input?: unknown
 }
 
@@ -27,6 +28,7 @@ interface AnthropicStreamEvent {
   content_block?: AnthropicContentBlock
   delta?: {
     text?: string
+    thinking?: string
     partial_json?: string
     stop_reason?: string
   }
@@ -128,10 +130,13 @@ interface MetricsData {
   output_tokens: number
   messageId: string | null
   openAIId: string | null
+  inThinking: boolean
+  hadThinking: boolean
+  answerStarted: boolean
 }
 
 interface ProcessResult {
-  type: 'chunk' | 'done'
+  type: 'chunk' | 'done' | 'ping'
   data?: OpenAIStreamChunk
 }
 
@@ -154,6 +159,9 @@ export function createConverterState(): ConverterState {
       output_tokens: 0,
       messageId: null,
       openAIId: null,
+      inThinking: false,
+      hadThinking: false,
+      answerStarted: false,
     },
   }
 }
@@ -197,7 +205,17 @@ export function convertNonStreamingResponse(
   // Process content blocks
   let textContent = ''
   for (const block of anthropicResponse.content || []) {
-    if (block.type === 'text') {
+    if (block.type === 'thinking' && block.thinking) {
+      // Render thinking as styled italic markdown
+      const lines = block.thinking
+        .split(/\n+/)
+        .map((t: string) => t.trim())
+        .filter((t: string) => t.length > 0)
+        .map((t: string) => `*${t}*`)
+        .join('\n\n')
+      textContent += `\n\n${lines}\n\n---\n\n`
+      continue
+    } else if (block.type === 'text') {
       textContent += block.text
     } else if (block.type === 'tool_use' && block.id && block.name) {
       openAIResponse.choices[0].message.tool_calls.push({
@@ -243,15 +261,36 @@ export function processChunk(
           trimmedLine.replace(/^data: /, ''),
         )
 
-        // Skip certain event types that OpenAI doesn't use
-        if (data.type === 'ping' || data.type === 'content_block_stop') {
+        // Forward ping events as keepalive signals
+        if (data.type === 'ping') {
+          results.push({ type: 'ping' })
           continue
         }
 
-        // Skip text content_block_start (we only care about tool_use blocks)
+        // Handle content_block_stop — close thinking if this was a thinking block
+        if (data.type === 'content_block_stop') {
+          if (state.metricsData.inThinking) {
+            state.metricsData.inThinking = false
+            const closeChunk: OpenAIStreamChunk = {
+              id: state.metricsData.openAIId || 'chatcmpl-' + Date.now(),
+              object: 'chat.completion.chunk' as const,
+              created: Math.floor(Date.now() / 1000),
+              model: state.metricsData.model || 'claude-unknown',
+              choices: [{
+                index: 0,
+                delta: { content: '\n\n---\n\n' },
+                finish_reason: null,
+              }],
+            }
+            results.push({ type: 'chunk', data: closeChunk })
+          }
+          continue
+        }
+
+        // Skip text and thinking content_block_start (we only care about tool_use blocks)
         if (
           data.type === 'content_block_start' &&
-          data.content_block?.type === 'text'
+          (data.content_block?.type === 'text' || data.content_block?.type === 'thinking')
         ) {
           continue
         }
@@ -267,6 +306,23 @@ export function processChunk(
             type: 'chunk',
             data: openAIChunk,
           })
+        }
+
+        // Fallback: close thinking if still open when message stops
+        if (data.type === 'message_stop' && state.metricsData.inThinking) {
+          state.metricsData.inThinking = false
+          const thinkingChunk: OpenAIStreamChunk = {
+            id: state.metricsData.openAIId || 'chatcmpl-' + Date.now(),
+            object: 'chat.completion.chunk' as const,
+            created: Math.floor(Date.now() / 1000),
+            model: state.metricsData.model || 'claude-unknown',
+            choices: [{
+              index: 0,
+              delta: { content: '\n\n---\n\n' },
+              finish_reason: null,
+            }],
+          }
+          results.push({ type: 'chunk', data: thinkingChunk })
         }
 
         // Send usage chunk and [DONE] when message stops
@@ -521,7 +577,37 @@ function transformToOpenAI(
         )
       }
     }
+  } else if (data.type === 'content_block_delta' && data.delta?.thinking) {
+    // Stream thinking as italic text
+    let content = ''
+    if (!state.metricsData.inThinking) {
+      state.metricsData.inThinking = true
+      state.metricsData.hadThinking = true
+      state.metricsData.answerStarted = false
+      content = '\n\n'
+    }
+    // Render thinking text in italic
+    content += data.delta.thinking.replace(/\n/g, '\n')
+    if (content) {
+      openAIChunk = {
+        id: state.metricsData.openAIId || 'chatcmpl-' + Date.now(),
+        object: 'chat.completion.chunk' as const,
+        created: Math.floor(Date.now() / 1000),
+        model: state.metricsData.model || 'claude-unknown',
+        choices: [{
+          index: 0,
+          delta: { content },
+          finish_reason: null,
+        }],
+      }
+    }
   } else if (data.type === 'content_block_delta' && data.delta?.text) {
+    // Add prefix on the first text chunk after thinking was shown
+    let prefix = ''
+    if (state.metricsData.hadThinking && !state.metricsData.answerStarted) {
+      state.metricsData.answerStarted = true
+      prefix = ''
+    }
     openAIChunk = {
       id: state.metricsData.openAIId || 'chatcmpl-' + Date.now(),
       object: 'chat.completion.chunk' as const,
@@ -530,7 +616,7 @@ function transformToOpenAI(
       choices: [
         {
           index: 0,
-          delta: { content: data.delta.text },
+          delta: { content: prefix + data.delta.text },
           finish_reason: null,
         },
       ],

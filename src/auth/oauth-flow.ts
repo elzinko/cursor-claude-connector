@@ -100,6 +100,7 @@ export async function exchangeCodeForTokens(
       redirect_uri: REDIRECT_URI,
       code_verifier: verifier,
     }),
+    signal: AbortSignal.timeout(30_000), // 30s timeout for token exchange
   })
 
   if (!response.ok) {

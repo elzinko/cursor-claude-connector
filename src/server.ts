@@ -248,6 +248,16 @@ app.get('/v1/models', async (c: Context) => {
     // Sort models by created timestamp (newest first)
     models.sort((a, b) => b.created - a.created)
 
+    // Add alias models so they appear in Cursor's model dropdown
+    for (const [alias, target] of Object.entries(MODEL_ALIASES)) {
+      models.unshift({
+        id: alias,
+        object: 'model' as const,
+        created: Math.floor(Date.now() / 1000),
+        owned_by: 'proxy-alias',
+      })
+    }
+
     const response_data: ModelsListResponse = {
       object: 'list',
       data: models,
@@ -263,27 +273,60 @@ app.get('/v1/models', async (c: Context) => {
   }
 })
 
+// ── Model Aliases ─────────────────────────────────────────────────────
+// Cursor routes Claude model names through its own backend, bypassing
+// the custom Base URL. Using a non-Anthropic model name (e.g. deepseek-coder)
+// forces Cursor to send the request to OUR proxy instead.
+const MODEL_ALIASES: Record<string, string> = {
+  'deepseek-coder':       'claude-opus-4-6',
+  'deepseek-chat':        'claude-sonnet-4-6',
+  'deepseek-reasoner':    'claude-sonnet-4-6',
+}
+
 // Map model names sent by Cursor/IDEs to actual Anthropic API model IDs.
 // Cursor fabricates non-standard IDs (e.g. appending old snapshot dates).
 // The official Anthropic API IDs for 4.6 models have NO date suffix.
 // See: https://docs.anthropic.com/en/docs/about-claude/models
 function mapModelName(model: string): string {
+  // ── Check aliases first (deepseek-coder → claude-opus-4-6, etc.) ──
+  const lowerModel = model.toLowerCase()
+  if (MODEL_ALIASES[lowerModel]) {
+    console.log(`[PROXY] Model alias: ${model} -> ${MODEL_ALIASES[lowerModel]}`)
+    return MODEL_ALIASES[lowerModel]
+  }
+
+  // ── Handle Cursor's format like "claude-4.6-opus-high" → "claude-opus-4-6"
+  const cursorPattern = /^claude-(\d+(?:\.\d+)?)-(\w+)(?:-\w+)?$/i
+  const cursorMatch = model.match(cursorPattern)
+  if (cursorMatch) {
+    const version = cursorMatch[1].replace('.', '-')
+    const family = cursorMatch[2].toLowerCase()
+    const normalized = `claude-${family}-${version}`
+    console.log(`[PROXY] Model normalized: ${model} -> ${normalized}`)
+    return normalized
+  }
+
+  // ── Handle dots in version: "claude-opus-4.6" → "claude-opus-4-6"
+  const dotFixed = model.replace(/claude-(\w+)-(\d+)\.(\d+)/i, 'claude-$1-$2-$3')
+  if (dotFixed !== model) {
+    console.log(`[PROXY] Model dot-fix: ${model} -> ${dotFixed}`)
+    return dotFixed
+  }
+
   const MODEL_MAP: Record<string, string> = {
     // ── Claude 4.6 (latest) ──────────────────────────────────────────
-    // Cursor appends the old 4.0 snapshot date "20250514" which is wrong.
-    // Official 4.6 IDs are just "claude-sonnet-4-6" / "claude-opus-4-6".
     'claude-sonnet-4-6-20250514': 'claude-sonnet-4-6',
     'claude-opus-4-6-20250514':   'claude-opus-4-6',
 
     // ── Claude 4.5 ──────────────────────────────────────────────────
-    'claude-sonnet-4-5-20250929': 'claude-sonnet-4-5-20250929',  // passthrough (valid)
-    'claude-opus-4-5-20251101':   'claude-opus-4-5-20251101',    // passthrough (valid)
-    'claude-sonnet-4-5-20241022': 'claude-sonnet-4-5-20250929',  // Cursor may send wrong date
-    'claude-opus-4-5-20241022':   'claude-opus-4-5-20251101',    // Cursor may send wrong date
+    'claude-sonnet-4-5-20250929': 'claude-sonnet-4-5-20250929',
+    'claude-opus-4-5-20251101':   'claude-opus-4-5-20251101',
+    'claude-sonnet-4-5-20241022': 'claude-sonnet-4-5-20250929',
+    'claude-opus-4-5-20241022':   'claude-opus-4-5-20251101',
 
     // ── Claude 4.0 ──────────────────────────────────────────────────
-    'claude-sonnet-4-20250514':   'claude-sonnet-4-20250514',    // passthrough (valid)
-    'claude-opus-4-20250514':     'claude-opus-4-20250514',      // passthrough (valid)
+    'claude-sonnet-4-20250514':   'claude-sonnet-4-20250514',
+    'claude-opus-4-20250514':     'claude-opus-4-20250514',
 
     // ── Legacy 3.x aliases → map to closest current model ───────────
     'claude-3-5-sonnet-latest':   'claude-sonnet-4-6',
@@ -296,10 +339,10 @@ function mapModelName(model: string): string {
     'claude-opus-latest':         'claude-opus-4-6',
 
     // ── Haiku ───────────────────────────────────────────────────────
-    'claude-haiku-4-5-20251001':  'claude-haiku-4-5-20251001',   // passthrough (valid)
+    'claude-haiku-4-5-20251001':  'claude-haiku-4-5-20251001',
     'claude-3-5-haiku-20241022':  'claude-haiku-4-5-20251001',
     'claude-3-5-haiku-latest':    'claude-haiku-4-5-20251001',
-    'claude-3-haiku-20240307':    'claude-3-haiku-20240307',     // passthrough (valid)
+    'claude-3-haiku-20240307':    'claude-3-haiku-20240307',
   }
 
   if (MODEL_MAP[model]) {
@@ -315,7 +358,7 @@ function mapModelName(model: string): string {
 const ANTHROPIC_ALLOWED_FIELDS = new Set([
   'model', 'messages', 'system', 'max_tokens', 'metadata',
   'stop_sequences', 'stream', 'temperature', 'top_p', 'top_k',
-  'tools', 'tool_choice',
+  'tools', 'tool_choice', 'thinking',
 ])
 
 function sanitizeBodyForAnthropic(body: Record<string, unknown>): Record<string, unknown> {
@@ -399,6 +442,71 @@ const messagesFn = async (c: Context) => {
     return c.json(createCursorBypassResponse())
   }
 
+  // ── Convert OpenAI tool_choice format to Anthropic format ──────────
+  if ((body as any).tool_choice !== undefined) {
+    const tc = (body as any).tool_choice
+    if (tc === 'auto') {
+      (body as any).tool_choice = { type: 'auto' }
+    } else if (tc === 'none') {
+      delete (body as any).tool_choice
+    } else if (tc === 'required') {
+      (body as any).tool_choice = { type: 'any' }
+    } else if (tc?.type === 'function' && tc?.function?.name) {
+      (body as any).tool_choice = { type: 'tool', name: tc.function.name }
+    }
+  }
+
+  // ── Convert OpenAI-format tools to Anthropic format ────────────────
+  if ((body as any).tools) {
+    (body as any).tools = (body as any).tools.map((tool: any) => {
+      if (tool.type === 'function' && tool.function) {
+        return {
+          name: tool.function.name,
+          description: tool.function.description || '',
+          input_schema: tool.function.parameters || { type: 'object', properties: {} },
+        }
+      }
+      return tool
+    })
+  }
+
+  // ── Convert OpenAI-format messages to Anthropic format ─────────────
+  // (assistant with tool_calls → tool_use blocks, tool role → tool_result)
+  if (body.messages) {
+    const convertedMessages: any[] = []
+    for (const msg of body.messages) {
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        const content: any[] = []
+        if (msg.content) {
+          content.push({ type: 'text', text: msg.content })
+        }
+        for (const tc of msg.tool_calls) {
+          content.push({
+            type: 'tool_use',
+            id: tc.id,
+            name: tc.function?.name || '',
+            input: typeof tc.function?.arguments === 'string'
+              ? JSON.parse(tc.function.arguments || '{}')
+              : (tc.function?.arguments || {}),
+          })
+        }
+        convertedMessages.push({ role: 'assistant', content })
+      } else if (msg.role === 'tool') {
+        convertedMessages.push({
+          role: 'user',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: msg.tool_call_id,
+            content: msg.content || '',
+          }],
+        })
+      } else {
+        convertedMessages.push(msg)
+      }
+    }
+    body.messages = convertedMessages
+  }
+
   try {
     let transformToOpenAIFormat = false
 
@@ -429,12 +537,26 @@ const messagesFn = async (c: Context) => {
       if (!body.max_tokens) {
         const model = body.model.toLowerCase()
         if (model.includes('opus')) {
-          body.max_tokens = 32_000
+          body.max_tokens = 128_000
         } else if (model.includes('haiku')) {
           body.max_tokens = 8_192
         } else {
           // Default for sonnet and any other/future model
           body.max_tokens = 64_000
+        }
+      }
+
+      // ── Extended thinking ────────────────────────────────────────────
+      // Opus 4.6+ uses adaptive thinking, older models use budget_tokens
+      if (body.model.includes('opus-4-6')) {
+        body.thinking = {
+          type: 'adaptive',
+        }
+      } else {
+        const maxTokens = (body.max_tokens as number) || 32000
+        body.thinking = {
+          type: 'enabled',
+          budget_tokens: maxTokens > 16000 ? 16000 : maxTokens - 1000,
         }
       }
     }
@@ -453,11 +575,18 @@ const messagesFn = async (c: Context) => {
       )
     }
 
+    // When thinking is enabled, temperature/top_p/top_k are not supported
+    if (body.thinking) {
+      delete (body as any).temperature
+      delete (body as any).top_p
+      delete (body as any).top_k
+    }
+
     const headers: Record<string, string> = {
       'content-type': 'application/json',
       authorization: `Bearer ${oauthToken}`,
       'anthropic-beta':
-        'oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14',
+        'oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14',
       'anthropic-version': '2023-06-01',
       'user-agent': '@anthropic-ai/sdk 1.2.12 node/22.13.1',
       accept: isStreaming ? 'text/event-stream' : 'application/json',
@@ -483,6 +612,7 @@ const messagesFn = async (c: Context) => {
       method: 'POST',
       headers,
       body: JSON.stringify(cleanBody),
+      signal: c.req.raw.signal,
     })
 
     if (!response.ok) {
@@ -554,7 +684,10 @@ const messagesFn = async (c: Context) => {
               const results = processChunk(converterState, chunk, enableLogging)
 
               for (const result of results) {
-                if (result.type === 'chunk') {
+                if (result.type === 'ping') {
+                  // Forward as SSE comment to keep connection alive during long thinking
+                  await stream.write(': ping\n\n')
+                } else if (result.type === 'chunk') {
                   const dataToSend = `data: ${JSON.stringify(result.data)}\n\n`
                   if (enableLogging) {
                     console.log('✅ [SENDING] OpenAI Chunk:', dataToSend)
