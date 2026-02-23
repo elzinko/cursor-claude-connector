@@ -1,185 +1,111 @@
-# 🚀 Deployment Guide - Cursor Claude Connector
+# Deployment Guide
 
-This guide will help you connect Cursor with your Claude subscription using this proxy.
+## Prerequisites
 
-## 📋 Prerequisites
-
-1. **Active Claude subscription** (Pro or Max)
-2. **Cursor IDE** installed on your local machine
-3. **GitHub account** (for Vercel deployment)
-
-## 🔀 Two modes
-
-| Mode | Storage | When to use |
-|------|---------|-------------|
-| **Local** | File `.auth/credentials.json` | Dev on one machine, maximum security |
-| **Vercel** | Redis (Upstash) | Multi-device access, no PC required |
-
-> On Vercel (serverless), file storage doesn't persist between requests. Redis is required.
+- A Claude **Pro or Max** subscription
+- A [Vercel](https://vercel.com) account (free)
+- A [GitHub](https://github.com) account
 
 ---
 
-## ☁️ Option 1: Deploy to Vercel
+## Step 1 — Fork or clone the repository
 
-### One-click deploy
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/Maol-1997/cursor-claude-connector&env=API_KEY&integration-ids=oac_V3R1GIpkoJorr6fqyiwdhl17)
-
-1. Set `API_KEY` when prompted (required for public URL)
-2. Add Redis via Marketplace (see below)
-3. Redeploy to apply environment variables
-
-### Add Redis via Vercel Marketplace (recommended, free tier)
-
-> **Vercel KV** was discontinued in December 2024. Use **Upstash Redis** from the [Vercel Marketplace](https://vercel.com/marketplace?category=storage&search=redis) — same REST API, **free tier** included (256 MB storage, 500K commands/month).
-
-**Step-by-step:**
-
-1. Open your project on [Vercel Dashboard](https://vercel.com/dashboard)
-2. Go to the **Storage** tab
-3. Click **Connect Store** → **Browse Marketplace**
-4. Search for **Redis** → Select **[Upstash](https://vercel.com/marketplace/upstash)**
-5. Click **Add Integration** → Create new database or link existing
-6. Credentials (`UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`) are auto-injected
-7. **Redeploy** your project for env vars to take effect
-
-### Manual Redis setup
-
-1. Create a database at [Upstash Console](https://console.upstash.com/)
-2. Add these variables to Vercel (Settings → Environment Variables):
-   - `UPSTASH_REDIS_REST_URL`
-   - `UPSTASH_REDIS_REST_TOKEN`
-   - `API_KEY` (required for public URL)
-   - `CORS_ORIGINS` (your Vercel URL)
-
-### After deployment
-
-1. Visit `https://your-app.vercel.app/` to authenticate
-2. Configure Cursor: Base URL `https://your-app.vercel.app/v1` + API Key
+Fork [elzinko/cursor-claude-connector](https://github.com/elzinko/cursor-claude-connector) to your GitHub account, or clone it and push to your own repo.
 
 ---
 
-## 💻 Option 2: Local or VPS server
+## Step 2 — Deploy to Vercel
 
-### Local mode (no Redis)
+### Option A — One-click deploy (recommended)
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/elzinko/cursor-claude-connector&env=API_KEY&envDescription=Secret%20key%20to%20protect%20your%20proxy&integration-ids=oac_V3R1GIpkoJorr6fqyiwdhl17)
+
+- Set `API_KEY` to any secret string you choose (min. 8 characters)
+- Vercel will clone the repo and deploy it
+
+### Option B — Manual import
+
+1. Go to [vercel.com/new](https://vercel.com/new)
+2. Import your GitHub repository
+3. Add environment variable `API_KEY` before deploying
+4. Click **Deploy**
+
+---
+
+## Step 3 — Add Redis (required)
+
+The proxy stores OAuth tokens in Redis. Without it, you'll need to re-authenticate on every request.
+
+1. In your Vercel project → **Storage** tab → **Connect Store**
+2. Browse Marketplace → select **Upstash Redis**
+3. Create a new database (free tier: 256 MB, 500K commands/month)
+4. Vercel automatically injects `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`
+5. **Redeploy** your project to apply the new variables
+
+> **Note:** Vercel KV was discontinued in December 2024. Use Upstash Redis — same REST API, free tier available.
+
+---
+
+## Step 4 — Authenticate with Claude
+
+1. Open your Vercel URL in a browser: `https://your-app.vercel.app/`
+2. Click **"Connect with Claude"**
+3. Sign in with your Claude Pro/Max account and authorize the app
+4. Copy the code shown and paste it into the web interface
+5. You should see: *"You are successfully authenticated with Claude"*
+
+---
+
+## Step 5 — Configure Cursor
+
+→ Follow the [Cursor Setup Guide](SETUP.md)
+
+---
+
+## Environment variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `API_KEY` | ✅ Yes | Secret key to protect your proxy. Set it in Vercel and use it in Cursor. |
+| `UPSTASH_REDIS_REST_URL` | ✅ Yes | Auto-injected by Upstash integration |
+| `UPSTASH_REDIS_REST_TOKEN` | ✅ Yes | Auto-injected by Upstash integration |
+| `CORS_ORIGINS` | No | Comma-separated allowed origins. Defaults to all origins if unset. |
+| `RATE_LIMIT_REQUESTS` | No | Max requests per window per API key (default: 100) |
+| `RATE_LIMIT_WINDOW_MS` | No | Rate limit window in ms (default: 3600000 = 1h) |
+
+### Generate a strong API_KEY
 
 ```bash
-git clone https://github.com/Maol-1997/cursor-claude-connector.git
-cd cursor-claude-connector
-cp env.example .env
-npm run start:local
-# or: ./start.sh local
+openssl rand -hex 32
 ```
-
-### Server mode (with Redis)
-
-For a VPS or testing Vercel mode locally:
-
-1. Add `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` to `.env`
-2. Run `npm run start:vercel` or `./start.sh vercel`
-
-### Start scripts
-
-| Script | Command | Storage |
-|--------|---------|---------|
-| `npm run start:local` | `./start.sh local` | File (`.auth/`) |
-| `npm run start:vercel` | `./start.sh vercel` | Redis (requires env) |
-| `npm run start` | `./start.sh` | Auto-detect |
-
-## 🔐 Claude Authentication
-
-### 1. Access the web interface
-
-Open your browser and navigate to:
-
-```
-http://your-server-ip:9095/
-```
-
-Or if using a custom port:
-
-```
-http://your-server-ip:YOUR_PORT/
-```
-
-![Login Interface](images/login.webp)
-
-### 2. Authentication process
-
-1. Click **"Connect with Claude"**
-
-   ![Claude OAuth Step 1](images/claude-oauth-1.webp)
-
-2. A Claude window will open for authentication
-3. Sign in with your Claude account (Pro/Max)
-4. Authorize the application
-
-   ![Claude OAuth Step 2](images/claude-oauth-2.webp)
-
-5. You'll be redirected to a page with a code
-6. Copy the ENTIRE code (it includes a # in the middle)
-7. Paste it in the web interface field
-8. Click **"Submit Code"**
-
-### 3. Verify authentication
-
-If everything went well, you'll see the message: **"You are successfully authenticated with Claude"**
-
-![Logged In](images/logged-in.webp)
-
-## 🖥️ Cursor Configuration
-
-### 1. Open Cursor settings
-
-1. In Cursor, press `Cmd+,` (Mac) or `Ctrl+,` (Windows/Linux)
-2. Go to the **"Models"** section
-3. Look for the **"Override OpenAI Base URL"** option
-
-### 2. Configure the endpoint
-
-1. Enable **"Override OpenAI Base URL"**
-2. In the URL field, enter:
-
-   **For Vercel deployment:**
-
-   ```
-   https://your-app-name.vercel.app/v1
-   ```
-
-   **For manual server deployment:**
-
-   ```
-   http://your-server-ip:9095/v1
-   ```
-
-   Examples:
-
-   ```
-   https://cursor-claude-proxy.vercel.app/v1
-   http://54.123.45.67:9095/v1
-   ```
-
-![Cursor Custom URL Configuration](images/cursor-custom-url.webp)
-
-### 3. Verify the connection
-
-1. In the models list, you should see the available Claude models
-
-2. Select your preferred model
-
-3. Try typing something in Cursor's chat
-
-## ✅ That's it!
-
-You're now using Claude's full power directly in Cursor IDE. The proxy will handle all the communication between Cursor and Claude using your subscription.
-
-## 🔍 Quick Troubleshooting
-
-- **Can't connect?** Make sure the server is running (check the terminal where you ran `./start.sh`)
-- **Authentication failed?** Try visiting `http://your-server-ip:PORT/auth/logout` and authenticate again
-- **Models not showing?** Restart Cursor and make sure the URL ends with `/v1`
-- **Using custom port?** Make sure to use the same port in both the server and Cursor configuration
 
 ---
 
-Enjoy coding with Claude in Cursor! 🎉
+## Updating the proxy
+
+If you connected your GitHub repo to Vercel, push to `main` will trigger automatic deployments.
+
+Otherwise, deploy manually from the project directory:
+
+```bash
+vercel --prod
+```
+
+---
+
+## Local / VPS mode
+
+> ⚠️ **localhost does not work with Cursor.** Cursor routes requests through its own cloud servers, which block private IP addresses.
+
+Local mode is only useful if you run the proxy on a machine with a **public HTTPS URL** (e.g. a VPS with a domain and TLS certificate).
+
+```bash
+cp env.example .env
+# Edit .env: set API_KEY, and optionally UPSTASH_* for Redis
+npm install
+npm run start:local   # file-based token storage
+# or
+npm run start:vercel  # Redis-based token storage
+```
+
+Then open `http://your-server:9095/` to authenticate.
