@@ -278,9 +278,18 @@ app.get('/v1/models', async (c: Context) => {
 // the custom Base URL. Using a non-Anthropic model name (e.g. deepseek-coder)
 // forces Cursor to send the request to OUR proxy instead.
 const MODEL_ALIASES: Record<string, string> = {
+  // DeepSeek aliases — Cursor may reject these depending on validation settings
   'deepseek-coder':       'claude-opus-4-6',
   'deepseek-chat':        'claude-sonnet-4-6',
   'deepseek-reasoner':    'claude-sonnet-4-6',
+  // OpenAI-style aliases — Cursor accepts these unconditionally
+  'gpt-4o':               'claude-opus-4-6',
+  'gpt-4o-mini':          'claude-sonnet-4-6',
+  'gpt-4-turbo':          'claude-opus-4-6',
+  'gpt-4':                'claude-opus-4-6',
+  'gpt-3.5-turbo':        'claude-sonnet-4-6',
+  'o1':                   'claude-opus-4-6',
+  'o1-mini':              'claude-sonnet-4-6',
 }
 
 // Map model names sent by Cursor/IDEs to actual Anthropic API model IDs.
