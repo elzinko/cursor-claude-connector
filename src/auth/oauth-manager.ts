@@ -21,12 +21,8 @@ interface TokenResponse {
 // Storage mode: 'file' (local) or 'redis' (vercel). Auto-detect if not set.
 // Vercel: add Upstash Redis via Vercel Marketplace → Storage → Redis
 const storageMode = process.env.STORAGE_MODE?.toLowerCase()
-const redisUrl =
-  process.env.UPSTASH_REDIS_REST_URL?.trim() ||
-  process.env.KV_REST_API_URL?.trim()
-const redisToken =
-  process.env.UPSTASH_REDIS_REST_TOKEN?.trim() ||
-  process.env.KV_REST_API_TOKEN?.trim()
+const redisUrl = process.env.UPSTASH_REDIS_REST_URL?.trim()
+const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN?.trim()
 
 const useFileStorage =
   storageMode === 'file' ||
