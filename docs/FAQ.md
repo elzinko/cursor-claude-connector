@@ -24,6 +24,14 @@ Cursor intercepts well-known model names and routes them through its own backend
 
 Use the custom names provided in the [Cursor Setup Guide](SETUP.md) instead (e.g. `claude-proxy-opus-4.6`). These are unknown to Cursor, so it forwards them to your proxy unchanged.
 
+**I get "Provider Error" and the proxy receives no requests at all.**
+
+Check that the Base URL in Cursor ends with `/v1`:
+- ❌ `https://your-app.vercel.app` → Cursor sends to `/chat/completions` → 404
+- ✅ `https://your-app.vercel.app/v1` → Cursor sends to `/v1/chat/completions` → OK
+
+In Cursor: Settings → Models → Override OpenAI Base URL → make sure `/v1` is at the end.
+
 **Why doesn't localhost work?**
 
 Cursor routes all requests through its own cloud servers before they reach your endpoint. Those servers block connections to private IP addresses (`localhost`, `192.168.*`, `10.*`, etc.) as an SSRF security measure.
