@@ -2,17 +2,13 @@
 
 A proxy that lets you use your **Claude Pro/Max subscription** in Cursor IDE — no additional API costs.
 
-> ⚠️ **Cursor blocks connections to private/local IPs.** The proxy **must** be deployed on a public server (Vercel recommended). Running it on `localhost` will not work with Cursor.
-
----
-
-## How it works
-
 ```
 Cursor IDE → Proxy (Vercel) → Anthropic API (your Claude subscription)
 ```
 
 Cursor sends OpenAI-compatible requests to the proxy. The proxy authenticates with your Claude account via OAuth and forwards requests to Anthropic's API.
+
+> ⚠️ **Cursor blocks connections to private/local IPs.** The proxy **must** be deployed on a public server (Vercel recommended). Running it on `localhost` will not work with Cursor.
 
 ---
 
@@ -52,6 +48,7 @@ Open your Vercel URL in a browser and click **"Connect with Claude"**. Sign in w
 
 - [Deployment Guide](docs/DEPLOYMENT.md) — Vercel setup, Redis, environment variables
 - [Cursor Setup Guide](docs/SETUP.md) — Model names, Cursor configuration
+- [User Guide](docs/USER_GUIDE.md) — How to call the proxy (for users and LLMs)
 - [FAQ](docs/FAQ.md) — Common questions and issues
 
 ---
