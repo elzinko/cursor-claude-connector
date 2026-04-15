@@ -28,7 +28,15 @@ const useFileStorage =
   storageMode === 'file' ||
   (storageMode !== 'redis' && (!redisUrl || !redisToken))
 if (useFileStorage) {
-  console.log('📁 Using local file storage (.auth/credentials.json)')
+  if (process.env.VERCEL === '1') {
+    console.error(
+      '❌ MISCONFIG: Running on Vercel but Redis is not configured. ' +
+        'Set UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN (Preview scope included). ' +
+        'OAuth writes will fail until this is fixed.',
+    )
+  } else {
+    console.log('📁 Using local file storage (.auth/credentials.json)')
+  }
 } else {
   console.log('🔗 Using Redis storage (Vercel/Upstash)')
 }
@@ -51,7 +59,17 @@ async function get(): Promise<OAuthCredentials | null> {
 }
 
 async function set(credentials: OAuthCredentials): Promise<boolean> {
-  if (useFileStorage) return fileStorage.set(credentials)
+  if (useFileStorage) {
+    if (process.env.VERCEL === '1') {
+      throw new Error(
+        'Cannot persist OAuth tokens on Vercel without Redis. ' +
+          'Vercel filesystem is read-only (/var/task). ' +
+          'Configure UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in ' +
+          'Settings → Environment Variables (ensure Preview scope is enabled too), then redeploy.',
+      )
+    }
+    return fileStorage.set(credentials)
+  }
   try {
     await redis!.set(AUTH_KEY, credentials)
     return true
@@ -152,4 +170,36 @@ async function getAccessToken(): Promise<string | null> {
   return null
 }
 
-export { get, set, remove, getAll, getAccessToken }
+export interface TokenMetadata {
+  authenticated: boolean
+  expiresAt: string | null
+  expiresInSeconds: number | null
+  hasRefreshToken: boolean
+  storageMode: 'file' | 'redis'
+}
+
+async function getTokenMetadata(): Promise<TokenMetadata> {
+  const credentials = await get()
+  const storageMode: 'file' | 'redis' = useFileStorage ? 'file' : 'redis'
+
+  if (!credentials || credentials.type !== 'oauth' || !credentials.access) {
+    return {
+      authenticated: false,
+      expiresAt: null,
+      expiresInSeconds: null,
+      hasRefreshToken: false,
+      storageMode,
+    }
+  }
+
+  const expiresInMs = credentials.expires - Date.now()
+  return {
+    authenticated: expiresInMs > 0 || !!credentials.refresh,
+    expiresAt: new Date(credentials.expires).toISOString(),
+    expiresInSeconds: Math.max(0, Math.floor(expiresInMs / 1000)),
+    hasRefreshToken: !!credentials.refresh,
+    storageMode,
+  }
+}
+
+export { get, set, remove, getAll, getAccessToken, getTokenMetadata }

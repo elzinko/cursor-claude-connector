@@ -8,10 +8,17 @@ import {
 import { rateLimiter } from './middleware/rate-limiter'
 import { printStatusline } from './utils/statusline'
 import { statsRouter } from './routes/stats'
+import { statusRouter } from './routes/status'
+import { isApiKeyConfigured, validateApiKey } from './middleware/require-api-key'
+import {
+  getDeploymentInfo,
+  getDeploymentWarnings,
+  getEffectiveStorageMode,
+} from './utils/deployment-check'
 import { stream } from 'hono/streaming'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { getAccessToken } from './auth/oauth-manager'
+import { getAccessToken, getTokenMetadata } from './auth/oauth-manager'
 import {
   login as oauthLogin,
   logout as oauthLogout,
@@ -87,8 +94,11 @@ app.get('/index.html', async (c) => {
   return c.html(html)
 })
 
-// Stats API
+// Stats API (protected by API_KEY)
 app.route('/api/stats', statsRouter)
+
+// Status API — full dashboard JSON (protected by API_KEY)
+app.route('/api/status', statusRouter)
 
 // New OAuth start endpoint for UI
 app.post('/auth/oauth/start', async (c: Context) => {
@@ -190,11 +200,32 @@ app.post('/auth/logout', async (c: Context) => {
 })
 
 app.get('/auth/status', async (c: Context) => {
+  const info = getDeploymentInfo()
+  const warnings = getDeploymentWarnings()
+  const deployment = {
+    platform: info.platform,
+    vercelEnv: info.vercelEnv,
+    region: info.region,
+    warnings,
+  }
+
   try {
-    const token = await getAccessToken()
-    return c.json({ authenticated: !!token })
+    const metadata = await getTokenMetadata()
+    return c.json({
+      ...metadata,
+      apiKeyConfigured: isApiKeyConfigured(),
+      deployment,
+    })
   } catch (error) {
-    return c.json({ authenticated: false })
+    return c.json({
+      authenticated: false,
+      expiresAt: null,
+      expiresInSeconds: null,
+      hasRefreshToken: false,
+      storageMode: getEffectiveStorageMode(),
+      apiKeyConfigured: isApiKeyConfigured(),
+      deployment,
+    })
   }
 })
 
@@ -408,38 +439,13 @@ const messagesFn = async (c: Context) => {
 
   console.log(`[PROXY] ${c.req.path} model=${body.model} stream=${isStreaming}`)
 
-  // API Key validation - supports multiple keys (comma-separated in API_KEY)
-  // In production (Vercel), API_KEY is required for security
-  const providedKey = c.req.header('authorization')?.split(' ')?.[1]
-  const allowedKeys = process.env.API_KEY?.split(',').map((k) => k.trim()) || []
-  const isProduction = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production'
-
-  // Require API_KEY in production/Vercel for security
-  if (isProduction && allowedKeys.length === 0) {
-    console.error('⚠️  SECURITY WARNING: API_KEY is required in production but not set!')
-    return c.json(
-      {
-        error: 'Configuration error',
-        message: 'API_KEY must be configured in production environment',
-      },
-      500,
-    )
+  // API Key validation — shared with /api/stats and /api/status/full
+  const keyResult = validateApiKey(c)
+  if (!keyResult.ok) {
+    if (keyResult.status === 401) console.log('[PROXY] Rejected: invalid API key')
+    return c.json(keyResult.body, keyResult.status)
   }
-
-  if (allowedKeys.length > 0) {
-    if (!providedKey || !allowedKeys.includes(providedKey)) {
-      console.log('[PROXY] Rejected: invalid API key')
-      return c.json(
-        {
-          error: 'Authentication required',
-          message: 'Please provide a valid API key',
-        },
-        401,
-      )
-    }
-  }
-
-  const apiKey = providedKey || 'default'
+  const apiKey = keyResult.key
   const project = extractProjectFromApiKey(apiKey)
 
   // Rate limiting check

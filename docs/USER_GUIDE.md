@@ -35,6 +35,46 @@ Avant d’appeler l’API, le proxy doit être authentifié avec Claude via OAut
 
 ---
 
+## Endpoints de monitoring
+
+### `GET /auth/status` — public, léger
+
+Healthcheck à poller depuis EC2 ou un cron. Aucune clé requise, aucun champ sensible.
+
+```bash
+curl https://elzinko-cursor-claude-connector.vercel.app/auth/status
+```
+
+Réponse :
+
+```json
+{
+  "authenticated": true,
+  "expiresAt": "2026-04-15T14:32:00.000Z",
+  "expiresInSeconds": 7200,
+  "hasRefreshToken": true,
+  "storageMode": "redis",
+  "apiKeyConfigured": true
+}
+```
+
+Alerter si `authenticated: false` ou `expiresInSeconds < 600` (et pas de refresh token).
+
+### `GET /api/status/full` — protégé
+
+Inclut stats agrégées, rate-limit, env. Nécessite `Authorization: Bearer <API_KEY>`.
+
+```bash
+curl -H "Authorization: Bearer $API_KEY" \
+  https://elzinko-cursor-claude-connector.vercel.app/api/status/full
+```
+
+### `GET /api/stats` — protégé
+
+Logs de requêtes et stats de coût. Mêmes headers que ci-dessus.
+
+---
+
 ## Endpoints API
 
 ### Lister les modèles
