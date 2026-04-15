@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Claude Proxy — Status & Auth</title>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
     <style>
       :root {
         --background: 48 33.3333% 97.0588%;
@@ -75,7 +76,7 @@
       }
 
       .page {
-        max-width: 40rem;
+        max-width: 64rem;
         margin: 0 auto;
         display: flex;
         flex-direction: column;
@@ -345,6 +346,107 @@
         border: 1px solid hsl(var(--primary) / 0.25);
         color: hsl(var(--primary));
       }
+
+      /* ── Clients section ───────────────────────────────────────── */
+      .clients-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.8125rem;
+      }
+      .clients-table th,
+      .clients-table td {
+        text-align: left;
+        padding: 0.5rem 0.625rem;
+        border-bottom: 1px solid hsl(var(--border));
+        vertical-align: middle;
+      }
+      .clients-table th {
+        font-size: 0.6875rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: hsl(var(--muted-foreground));
+        background: hsl(var(--muted) / 0.4);
+      }
+      .clients-table td.mono,
+      .clients-table td .mono {
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+      }
+      .clients-table .client-ua {
+        display: inline-block;
+        padding: 0.0625rem 0.375rem;
+        border-radius: 9999px;
+        background: hsl(var(--secondary));
+        color: hsl(var(--secondary-foreground));
+        font-size: 0.6875rem;
+        font-weight: 500;
+      }
+      .clients-table .num {
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+      }
+      .badge.new {
+        background: hsl(var(--destructive) / 0.18);
+        color: hsl(var(--destructive));
+        animation: pulse 2s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.6; }
+      }
+      .badge.revoked {
+        background: hsl(var(--muted));
+        color: hsl(var(--muted-foreground));
+      }
+      .button-danger {
+        background: hsl(var(--destructive));
+        color: hsl(var(--destructive-foreground));
+        border: none;
+        border-radius: calc(var(--radius) - 4px);
+        padding: 0.25rem 0.625rem;
+        font-size: 0.6875rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 150ms ease;
+      }
+      .button-danger:hover:not(:disabled) { background: hsl(var(--destructive) / 0.85); }
+      .button-danger:disabled { opacity: 0.5; cursor: not-allowed; }
+      .button-ghost {
+        background: transparent;
+        color: hsl(var(--muted-foreground));
+        border: 1px solid hsl(var(--border));
+        border-radius: calc(var(--radius) - 4px);
+        padding: 0.25rem 0.625rem;
+        font-size: 0.6875rem;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .button-ghost:hover:not(:disabled) { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
+
+      .clients-empty {
+        text-align: center;
+        color: hsl(var(--muted-foreground));
+        padding: 1.5rem 0;
+        font-size: 0.8125rem;
+      }
+
+      .chart-wrap {
+        position: relative;
+        height: 18rem;
+        margin-top: 0.5rem;
+      }
+
+      .section-sub {
+        font-size: 0.75rem;
+        color: hsl(var(--muted-foreground));
+        margin-bottom: 0.75rem;
+      }
+
+      @media (max-width: 48rem) {
+        .clients-table th.opt,
+        .clients-table td.opt { display: none; }
+      }
     </style>
   </head>
   <body>
@@ -408,12 +510,48 @@
           <label for="apiKeyInput">API key</label>
           <input type="password" id="apiKeyInput" placeholder="Bearer token" autocomplete="off" />
         </div>
-        <button class="button-secondary" style="width: 100%;" onclick="loadFullStatus()">
-          <i data-lucide="eye"></i>Fetch /api/status/full
-        </button>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+          <button class="button-secondary" style="flex: 1;" onclick="loadFullStatus()">
+            <i data-lucide="eye"></i>Fetch /api/status/full
+          </button>
+          <button class="button-secondary" style="flex: 1;" onclick="loadClients()">
+            <i data-lucide="users"></i>Load clients & usage
+          </button>
+        </div>
         <pre class="json-output hidden" id="jsonOutput"></pre>
         <div id="jsonError" class="error-inline hidden">
           <i data-lucide="alert-circle"></i><span id="jsonErrorText"></span>
+        </div>
+      </section>
+
+      <section class="section hidden" id="clientsSection">
+        <div class="section-title">
+          <span>Clients
+            <span id="clientsBackend" style="font-size: 0.6875rem; color: hsl(var(--muted-foreground)); font-weight: 400; text-transform: none; letter-spacing: normal; margin-left: 0.5rem;"></span>
+          </span>
+          <button class="refresh-btn" onclick="loadClients()" aria-label="Refresh clients">
+            <i data-lucide="refresh-cw"></i>
+          </button>
+        </div>
+        <p class="section-sub">One row per <span class="mono" style="font-family: var(--font-mono);">hash(api_key + ip)</span>. A <span class="badge new" style="padding: 0 0.375rem;">NEW</span> badge flags clients first seen in the last 24h — check IP / UA / country to confirm it's you.</p>
+        <div id="clientsTableWrap">
+          <div class="clients-empty">No requests tracked yet.</div>
+        </div>
+        <div id="clientsError" class="error-inline hidden">
+          <i data-lucide="alert-circle"></i><span id="clientsErrorText"></span>
+        </div>
+      </section>
+
+      <section class="section hidden" id="usageSection">
+        <div class="section-title">
+          <span>Usage (last <span id="usageDays">30</span> days)</span>
+          <button class="refresh-btn" onclick="loadClients()" aria-label="Refresh usage">
+            <i data-lucide="refresh-cw"></i>
+          </button>
+        </div>
+        <p class="section-sub">Requests per day, stacked by client (top 5 + Other).</p>
+        <div class="chart-wrap">
+          <canvas id="usageChart"></canvas>
         </div>
       </section>
     </div>
@@ -629,6 +767,240 @@
           if (authWindow && !authWindow.closed) authWindow.close()
         }
       })
+
+      // ── Clients & usage ───────────────────────────────────────────
+      let usageChart = null
+
+      function countryFlag(code) {
+        if (!code || code.length !== 2) return ''
+        const base = 127397
+        return (
+          String.fromCodePoint(base + code.toUpperCase().charCodeAt(0)) +
+          String.fromCodePoint(base + code.toUpperCase().charCodeAt(1))
+        )
+      }
+
+      function formatRelative(iso) {
+        if (!iso) return '—'
+        const now = Date.now()
+        const then = new Date(iso).getTime()
+        if (Number.isNaN(then)) return iso
+        const s = Math.max(0, Math.floor((now - then) / 1000))
+        if (s < 60) return s + 's ago'
+        const m = Math.floor(s / 60)
+        if (m < 60) return m + 'm ago'
+        const h = Math.floor(m / 60)
+        if (h < 24) return h + 'h ago'
+        const d = Math.floor(h / 24)
+        return d + 'd ago'
+      }
+
+      function isNew(firstSeenIso) {
+        if (!firstSeenIso) return false
+        const first = new Date(firstSeenIso).getTime()
+        return Date.now() - first < 24 * 3600 * 1000
+      }
+
+      function truncate(s, n) {
+        if (!s) return ''
+        return s.length > n ? s.slice(0, n - 1) + '…' : s
+      }
+
+      function renderClients(data) {
+        const wrap = document.getElementById('clientsTableWrap')
+        const backendEl = document.getElementById('clientsBackend')
+        backendEl.textContent = data.backend
+          ? '· backend: ' + data.backend + ' · ' + data.retentionDays + 'd retention'
+          : ''
+
+        const clients = data.clients || []
+        if (!clients.length) {
+          wrap.innerHTML = '<div class="clients-empty">No requests tracked yet. Send a request to <span class="mono">/v1/chat/completions</span> to populate.</div>'
+          return
+        }
+
+        const rows = clients.map((c) => {
+          const newBadge = isNew(c.firstSeen) ? '<span class="badge new">NEW</span>' : ''
+          const revokedBadge = c.revoked ? '<span class="badge revoked">revoked</span>' : ''
+          const flag = countryFlag(c.country)
+          const btn = c.revoked
+            ? `<button class="button-ghost" onclick="unrevokeClient('${c.fingerprint}')"><i data-lucide="rotate-ccw" style="width:12px;height:12px;"></i> Unrevoke</button>`
+            : `<button class="button-danger" onclick="revokeClient('${c.fingerprint}')"><i data-lucide="ban" style="width:12px;height:12px;"></i> Revoke</button>`
+          return `<tr>
+            <td class="mono">${escapeHtml(c.fingerprint.slice(0, 8))}</td>
+            <td class="mono">${escapeHtml(c.ip || '—')}</td>
+            <td>${flag} ${escapeHtml(c.country || '—')}</td>
+            <td><span class="client-ua">${escapeHtml(c.uaParsed || 'unknown')}</span></td>
+            <td class="mono opt">${escapeHtml(c.apiKeySuffix || '—')}</td>
+            <td class="opt">${escapeHtml(formatRelative(c.firstSeen))}</td>
+            <td>${escapeHtml(formatRelative(c.lastSeen))}</td>
+            <td class="num">${(c.requests || 0).toLocaleString()}</td>
+            <td class="num opt">${((c.tokensIn || 0) + (c.tokensOut || 0)).toLocaleString()}</td>
+            <td class="num opt">${(c.blocked || 0).toLocaleString()}</td>
+            <td>${newBadge} ${revokedBadge} ${btn}</td>
+          </tr>`
+        }).join('')
+
+        wrap.innerHTML = `
+          <div style="overflow-x: auto;">
+            <table class="clients-table">
+              <thead><tr>
+                <th>FP</th>
+                <th>IP</th>
+                <th>Country</th>
+                <th>UA</th>
+                <th class="opt">Key</th>
+                <th class="opt">First</th>
+                <th>Last</th>
+                <th class="num">Req</th>
+                <th class="num opt">Tokens</th>
+                <th class="num opt">Blocked</th>
+                <th></th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`
+        lucide.createIcons()
+      }
+
+      function renderUsageChart(daily, clientsMap) {
+        const ctx = document.getElementById('usageChart')
+        if (!ctx) return
+        const labels = daily.map((d) => d.date.slice(5))
+
+        // Aggregate total per fingerprint to pick top 5
+        const totals = new Map()
+        for (const day of daily) {
+          for (const [fp, dc] of Object.entries(day.perFingerprint || {})) {
+            totals.set(fp, (totals.get(fp) || 0) + (dc.requests || 0))
+          }
+        }
+        const top = [...totals.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([fp]) => fp)
+        const topSet = new Set(top)
+
+        function labelFor(fp) {
+          const c = clientsMap.get(fp)
+          if (!c) return fp.slice(0, 6)
+          return (c.uaParsed || 'client') + ' · ' + (c.ip || fp.slice(0, 6))
+        }
+
+        const palette = [
+          'hsl(15, 65%, 55%)',
+          'hsl(210, 65%, 55%)',
+          'hsl(150, 55%, 45%)',
+          'hsl(280, 55%, 55%)',
+          'hsl(40, 75%, 55%)',
+          'hsl(0, 0%, 55%)',
+        ]
+
+        const datasets = top.map((fp, i) => ({
+          label: labelFor(fp),
+          data: daily.map((d) => (d.perFingerprint?.[fp]?.requests || 0)),
+          backgroundColor: palette[i],
+          stack: 'req',
+        }))
+        const otherData = daily.map((d) => {
+          let sum = 0
+          for (const [fp, dc] of Object.entries(d.perFingerprint || {})) {
+            if (!topSet.has(fp)) sum += (dc.requests || 0)
+          }
+          return sum
+        })
+        if (otherData.some((v) => v > 0)) {
+          datasets.push({
+            label: 'Other',
+            data: otherData,
+            backgroundColor: palette[5],
+            stack: 'req',
+          })
+        }
+
+        const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+        const tick = isDark ? 'hsl(46, 10%, 74%)' : 'hsl(48, 20%, 20%)'
+        const grid = isDark ? 'hsl(60, 5%, 23%)' : 'hsl(50, 8%, 84%)'
+
+        if (usageChart) usageChart.destroy()
+        usageChart = new Chart(ctx, {
+          type: 'bar',
+          data: { labels, datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: { stacked: true, ticks: { color: tick }, grid: { color: grid } },
+              y: { stacked: true, beginAtZero: true, ticks: { color: tick, precision: 0 }, grid: { color: grid } },
+            },
+            plugins: {
+              legend: { labels: { color: tick, boxWidth: 12 } },
+              tooltip: { mode: 'index', intersect: false },
+            },
+          },
+        })
+      }
+
+      async function loadClients() {
+        const key = document.getElementById('apiKeyInput').value.trim()
+        const errBox = document.getElementById('clientsError')
+        const errText = document.getElementById('clientsErrorText')
+        errBox.classList.add('hidden')
+        if (!key) { showJsonError('Enter the API key first'); return }
+
+        try {
+          const [cRes, dRes] = await Promise.all([
+            fetch('/api/clients', { headers: { Authorization: 'Bearer ' + key } }),
+            fetch('/api/clients/daily', { headers: { Authorization: 'Bearer ' + key } }),
+          ])
+          const cData = await cRes.json()
+          const dData = await dRes.json()
+          if (!cRes.ok) { errText.textContent = cData.message || ('HTTP ' + cRes.status); errBox.classList.remove('hidden'); return }
+          if (!dRes.ok) { errText.textContent = dData.message || ('HTTP ' + dRes.status); errBox.classList.remove('hidden'); return }
+
+          document.getElementById('clientsSection').classList.remove('hidden')
+          document.getElementById('usageSection').classList.remove('hidden')
+          document.getElementById('usageDays').textContent = dData.days || cData.retentionDays || 30
+
+          renderClients(cData)
+          const clientsMap = new Map((cData.clients || []).map((c) => [c.fingerprint, c]))
+          renderUsageChart(dData.daily || [], clientsMap)
+        } catch (err) {
+          errText.textContent = 'Failed to load clients'
+          errBox.classList.remove('hidden')
+        }
+      }
+
+      async function revokeClient(fp) {
+        const key = document.getElementById('apiKeyInput').value.trim()
+        if (!key) return
+        if (!confirm('Revoke client ' + fp.slice(0, 8) + '…?\nAll requests from this (api_key + IP) combo will be blocked immediately.')) return
+        try {
+          const res = await fetch('/api/clients/' + encodeURIComponent(fp) + '/revoke', {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + key },
+          })
+          if (!res.ok) throw new Error('HTTP ' + res.status)
+          await loadClients()
+        } catch (err) {
+          alert('Revoke failed: ' + err.message)
+        }
+      }
+
+      async function unrevokeClient(fp) {
+        const key = document.getElementById('apiKeyInput').value.trim()
+        if (!key) return
+        try {
+          const res = await fetch('/api/clients/' + encodeURIComponent(fp) + '/unrevoke', {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + key },
+          })
+          if (!res.ok) throw new Error('HTTP ' + res.status)
+          await loadClients()
+        } catch (err) {
+          alert('Unrevoke failed: ' + err.message)
+        }
+      }
 
       refreshStatus()
       setInterval(refreshStatus, 30000)

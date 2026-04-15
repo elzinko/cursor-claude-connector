@@ -9,7 +9,14 @@ import { rateLimiter } from './middleware/rate-limiter'
 import { printStatusline } from './utils/statusline'
 import { statsRouter } from './routes/stats'
 import { statusRouter } from './routes/status'
+import { clientsRouter } from './routes/clients'
 import { isApiKeyConfigured, validateApiKey } from './middleware/require-api-key'
+import {
+  tracker,
+  fingerprint as computeFingerprint,
+  getClientIp,
+  getCountry,
+} from './middleware/client-tracker'
 import {
   getDeploymentInfo,
   getDeploymentWarnings,
@@ -99,6 +106,9 @@ app.route('/api/stats', statsRouter)
 
 // Status API — full dashboard JSON (protected by API_KEY)
 app.route('/api/status', statusRouter)
+
+// Clients API — per-fingerprint list, daily usage, revoke/unrevoke (protected)
+app.route('/api/clients', clientsRouter)
 
 // New OAuth start endpoint for UI
 app.post('/auth/oauth/start', async (c: Context) => {
@@ -448,6 +458,34 @@ const messagesFn = async (c: Context) => {
   const apiKey = keyResult.key
   const project = extractProjectFromApiKey(apiKey)
 
+  // Client fingerprint (api_key + IP) + revocation check
+  const clientIp = getClientIp(c)
+  const clientUa = c.req.header('user-agent') || ''
+  const clientCountry = getCountry(c)
+  const clientFp = computeFingerprint(apiKey, clientIp)
+  if (await tracker.isRevoked(clientFp)) {
+    console.log(`[PROXY] Rejected: client ${clientFp} is revoked (ip=${clientIp})`)
+    // Record the blocked attempt for the dashboard.
+    await tracker.trackRequest({
+      fingerprint: clientFp,
+      apiKey,
+      ip: clientIp,
+      ua: clientUa,
+      country: clientCountry,
+      tokensIn: 0,
+      tokensOut: 0,
+      blocked: true,
+    })
+    return c.json(
+      {
+        error: 'Client revoked',
+        message:
+          'This client has been revoked from the proxy dashboard. Contact the proxy administrator.',
+      },
+      403,
+    )
+  }
+
   // Rate limiting check
   const rateCheck = rateLimiter.check(project)
   if (!rateCheck.allowed) {
@@ -683,6 +721,18 @@ const messagesFn = async (c: Context) => {
         )
       }
 
+      // Persist client-level stats even on upstream error (tokens unknown).
+      await tracker.trackRequest({
+        fingerprint: clientFp,
+        apiKey,
+        ip: clientIp,
+        ua: clientUa,
+        country: clientCountry,
+        tokensIn: 0,
+        tokensOut: 0,
+        blocked: false,
+      })
+
       if (response.status === 401) {
         return c.json<ErrorResponse>(
           {
@@ -701,6 +751,20 @@ const messagesFn = async (c: Context) => {
     }
 
     if (isStreaming) {
+      // Streaming: we don't have token usage until the stream closes, so persist
+      // a request-count-only entry here. Token counts for streaming are a TODO
+      // (requires parsing message_start / message_delta SSE events).
+      await tracker.trackRequest({
+        fingerprint: clientFp,
+        apiKey,
+        ip: clientIp,
+        ua: clientUa,
+        country: clientCountry,
+        tokensIn: 0,
+        tokensOut: 0,
+        blocked: false,
+      })
+
       response.headers.forEach((value, key) => {
         if (
           key.toLowerCase() !== 'content-encoding' &&
@@ -761,6 +825,18 @@ const messagesFn = async (c: Context) => {
 
       // Log request (non-streaming only for now)
       logRequest(c, apiKey, body.model, startTime, responseData, response.status)
+
+      // Per-client stats (non-streaming has usage tokens available)
+      await tracker.trackRequest({
+        fingerprint: clientFp,
+        apiKey,
+        ip: clientIp,
+        ua: clientUa,
+        country: clientCountry,
+        tokensIn: responseData.usage?.input_tokens || 0,
+        tokensOut: responseData.usage?.output_tokens || 0,
+        blocked: false,
+      })
 
       if (transformToOpenAIFormat) {
         const openAIResponse = convertNonStreamingResponse(responseData)
