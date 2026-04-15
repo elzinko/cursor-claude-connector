@@ -670,13 +670,21 @@ const messagesFn = async (c: Context) => {
     const routingGroup = c.req.header('x-routing-group')
 
     // Build the anthropic-beta header dynamically.
-    // Add 1M context window beta for Sonnet models only (Opus/Haiku don't support it).
+    // The 1M context window beta for Sonnet triggers Anthropic's
+    // "Extra usage is required for long context requests" rate limit on
+    // accounts that haven't enabled long-context billing — even for tiny
+    // requests. Gate it behind an opt-in env var so the proxy stays usable
+    // by default; users who've enabled long-context on their Anthropic
+    // plan can set ENABLE_1M_CONTEXT=true to get back the 1M window.
     const anthropicBetas = [
       'oauth-2025-04-20',
       'fine-grained-tool-streaming-2025-05-14',
       'interleaved-thinking-2025-05-14',
     ]
-    if (body.model.toLowerCase().includes('sonnet')) {
+    if (
+      process.env.ENABLE_1M_CONTEXT === 'true' &&
+      body.model.toLowerCase().includes('sonnet')
+    ) {
       anthropicBetas.push('context-1m-2025-08-07')
     }
 
