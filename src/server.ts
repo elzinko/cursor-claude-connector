@@ -621,27 +621,6 @@ const messagesFn = async (c: Context) => {
           body.max_tokens = 16_000
         }
       }
-
-      // ── Extended thinking ────────────────────────────────────────────
-      // Opus 4.6+ uses adaptive thinking, older models use budget_tokens.
-      // Anthropic requires budget_tokens >= 1024, and the budget must leave
-      // room for the actual response. Skip extended thinking when max_tokens
-      // is too small to accommodate both, and split ~50/50 below the 16K cap
-      // otherwise (avoids the old `maxTokens - 1000` formula starving responses
-      // at the new 16K default).
-      if (body.model.includes('opus-4-6')) {
-        body.thinking = {
-          type: 'adaptive',
-        }
-      } else {
-        const maxTokens = (body.max_tokens as number) || 32000
-        if (maxTokens >= 2048) {
-          body.thinking = {
-            type: 'enabled',
-            budget_tokens: Math.max(1024, Math.min(16000, Math.floor(maxTokens / 2))),
-          }
-        }
-      }
     }
 
     const oauthToken = await getAccessToken()
@@ -679,8 +658,11 @@ const messagesFn = async (c: Context) => {
     const anthropicBetas = [
       'oauth-2025-04-20',
       'fine-grained-tool-streaming-2025-05-14',
-      'interleaved-thinking-2025-05-14',
     ]
+    // interleaved-thinking beta only matters when thinking is enabled
+    if (body.thinking) {
+      anthropicBetas.push('interleaved-thinking-2025-05-14')
+    }
     if (
       process.env.ENABLE_1M_CONTEXT === 'true' &&
       body.model.toLowerCase().includes('sonnet')
