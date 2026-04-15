@@ -567,15 +567,16 @@ const messagesFn = async (c: Context) => {
       }
 
       // Anthropic API requires max_tokens. Set sensible defaults per model family.
+      // Keep these small to leave headroom for input context
+      // (Claude's context_window is the sum of input + output tokens).
+      // Clients that need longer completions can always pass max_tokens explicitly.
       if (!body.max_tokens) {
         const model = body.model.toLowerCase()
-        if (model.includes('opus')) {
-          body.max_tokens = 128_000
-        } else if (model.includes('haiku')) {
+        if (model.includes('haiku')) {
           body.max_tokens = 8_192
         } else {
-          // Default for sonnet and any other/future model
-          body.max_tokens = 64_000
+          // Default for opus, sonnet, and any other/future model.
+          body.max_tokens = 16_000
         }
       }
 
@@ -619,11 +620,21 @@ const messagesFn = async (c: Context) => {
     // significantly improves routing success rate through Cursor's backend
     const routingGroup = c.req.header('x-routing-group')
 
+    // Build the anthropic-beta header dynamically.
+    // Add 1M context window beta for Sonnet models only (Opus/Haiku don't support it).
+    const anthropicBetas = [
+      'oauth-2025-04-20',
+      'fine-grained-tool-streaming-2025-05-14',
+      'interleaved-thinking-2025-05-14',
+    ]
+    if (body.model.toLowerCase().includes('sonnet')) {
+      anthropicBetas.push('context-1m-2025-08-07')
+    }
+
     const headers: Record<string, string> = {
       'content-type': 'application/json',
       authorization: `Bearer ${oauthToken}`,
-      'anthropic-beta':
-        'oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14',
+      'anthropic-beta': anthropicBetas.join(','),
       'anthropic-version': '2023-06-01',
       'user-agent': '@anthropic-ai/sdk 1.2.12 node/22.13.1',
       accept: isStreaming ? 'text/event-stream' : 'application/json',
