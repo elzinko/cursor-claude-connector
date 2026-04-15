@@ -553,7 +553,15 @@ const messagesFn = async (c: Context) => {
       if (msg.role === 'assistant' && msg.tool_calls) {
         const content: any[] = []
         if (msg.content) {
-          content.push({ type: 'text', text: msg.content })
+          if (typeof msg.content === 'string') {
+            content.push({ type: 'text', text: msg.content })
+          } else if (Array.isArray(msg.content)) {
+            // Already in Anthropic block format (e.g. openclaw sends
+            // [{type:"text", text:"..."}]). Pass blocks through as-is —
+            // double-wrapping them under another {type:"text", text: […]}
+            // makes Anthropic reject with "text.text: Input should be a valid string".
+            content.push(...msg.content)
+          }
         }
         for (const tc of msg.tool_calls) {
           content.push({
@@ -602,10 +610,20 @@ const messagesFn = async (c: Context) => {
       })
 
       for (const sysMsg of systemMessages) {
-        body.system.push({
-          type: 'text',
-          text: sysMsg.content || ''
-        })
+        // system content can be a string OR an array of blocks (OpenAI
+        // responses-style, e.g. [{type:"text", text:"..."}]).
+        // Anthropic's system[].text must be a string — flatten array blocks
+        // into separate entries instead of nesting the array under `text`.
+        const c = sysMsg.content
+        if (typeof c === 'string') {
+          if (c) body.system.push({ type: 'text', text: c })
+        } else if (Array.isArray(c)) {
+          for (const block of c) {
+            if (block && typeof block.text === 'string' && block.text) {
+              body.system.push({ type: 'text', text: block.text })
+            }
+          }
+        }
       }
 
       // Anthropic API requires max_tokens. Set sensible defaults per model family.
