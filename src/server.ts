@@ -585,16 +585,23 @@ const messagesFn = async (c: Context) => {
       }
 
       // ── Extended thinking ────────────────────────────────────────────
-      // Opus 4.6+ uses adaptive thinking, older models use budget_tokens
+      // Opus 4.6+ uses adaptive thinking, older models use budget_tokens.
+      // Anthropic requires budget_tokens >= 1024, and the budget must leave
+      // room for the actual response. Skip extended thinking when max_tokens
+      // is too small to accommodate both, and split ~50/50 below the 16K cap
+      // otherwise (avoids the old `maxTokens - 1000` formula starving responses
+      // at the new 16K default).
       if (body.model.includes('opus-4-6')) {
         body.thinking = {
           type: 'adaptive',
         }
       } else {
         const maxTokens = (body.max_tokens as number) || 32000
-        body.thinking = {
-          type: 'enabled',
-          budget_tokens: maxTokens > 16000 ? 16000 : maxTokens - 1000,
+        if (maxTokens >= 2048) {
+          body.thinking = {
+            type: 'enabled',
+            budget_tokens: Math.max(1024, Math.min(16000, Math.floor(maxTokens / 2))),
+          }
         }
       }
     }
