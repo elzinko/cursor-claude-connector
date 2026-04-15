@@ -318,6 +318,33 @@
         overflow-x: auto;
         white-space: nowrap;
       }
+
+      .warnings { margin-bottom: 0.75rem; display: flex; flex-direction: column; gap: 0.5rem; }
+
+      .warning-item {
+        border-radius: calc(var(--radius) - 2px);
+        padding: 0.75rem 0.875rem;
+        font-size: 0.8125rem;
+        line-height: 1.5;
+        display: flex;
+        gap: 0.5rem;
+        align-items: flex-start;
+      }
+
+      .warning-item i { width: 16px; height: 16px; flex-shrink: 0; margin-top: 2px; }
+      .warning-item .msg { font-weight: 500; margin-bottom: 0.25rem; }
+      .warning-item .fix { color: hsl(var(--muted-foreground)); font-weight: 400; }
+
+      .warning-item.error {
+        background: hsl(var(--destructive) / 0.08);
+        border: 1px solid hsl(var(--destructive) / 0.25);
+        color: hsl(var(--destructive));
+      }
+      .warning-item.warning {
+        background: hsl(var(--primary) / 0.08);
+        border: 1px solid hsl(var(--primary) / 0.25);
+        color: hsl(var(--primary));
+      }
     </style>
   </head>
   <body>
@@ -334,11 +361,14 @@
             <i data-lucide="refresh-cw"></i>
           </button>
         </div>
+        <div id="warnings" class="warnings hidden"></div>
         <div class="status-grid" id="statusGrid">
           <div class="stat-card"><div class="label"><i data-lucide="shield"></i>Auth</div><div class="value" id="statAuth">…</div></div>
           <div class="stat-card"><div class="label"><i data-lucide="clock"></i>Expires in</div><div class="value" id="statExpires">…</div></div>
           <div class="stat-card"><div class="label"><i data-lucide="database"></i>Storage</div><div class="value" id="statStorage">…</div></div>
           <div class="stat-card"><div class="label"><i data-lucide="key"></i>API key</div><div class="value" id="statApiKey">…</div></div>
+          <div class="stat-card"><div class="label"><i data-lucide="cloud"></i>Platform</div><div class="value" id="statPlatform">…</div></div>
+          <div class="stat-card"><div class="label"><i data-lucide="git-branch"></i>Env</div><div class="value" id="statEnv">…</div></div>
         </div>
         <div class="curl-hint">curl <span id="baseUrl"></span>/auth/status</div>
       </section>
@@ -416,12 +446,31 @@
         }
 
         document.getElementById('statExpires').textContent = formatDuration(data.expiresInSeconds)
-        document.getElementById('statStorage').textContent = data.storageMode || '—'
+
+        const storageEl = document.getElementById('statStorage')
+        const mode = data.storageMode || '—'
+        const isVercelFile = data.deployment?.platform === 'vercel' && mode === 'file'
+        storageEl.innerHTML = isVercelFile
+          ? `<span class="badge ko"><i data-lucide="alert-triangle"></i>${mode} (broken)</span>`
+          : mode === 'redis'
+          ? `<span class="badge ok"><i data-lucide="database"></i>redis</span>`
+          : `<span class="badge">${mode}</span>`
 
         const apiKeyEl = document.getElementById('statApiKey')
         apiKeyEl.innerHTML = data.apiKeyConfigured
           ? '<span class="badge ok"><i data-lucide="check"></i>configured</span>'
-          : '<span class="badge warn"><i data-lucide="alert-triangle"></i>not set</span>'
+          : '<span class="badge ko"><i data-lucide="alert-triangle"></i>not set</span>'
+
+        const platformEl = document.getElementById('statPlatform')
+        const platform = data.deployment?.platform || 'local'
+        platformEl.innerHTML = platform === 'vercel'
+          ? '<span class="badge ok"><i data-lucide="cloud"></i>vercel</span>'
+          : '<span class="badge"><i data-lucide="laptop"></i>local</span>'
+
+        document.getElementById('statEnv').textContent =
+          data.deployment?.vercelEnv || data.deployment?.region || '—'
+
+        renderWarnings(data.deployment?.warnings || [])
 
         const auth = document.getElementById('authenticatedView')
         const unauth = document.getElementById('unauthenticatedView')
@@ -429,6 +478,36 @@
         unauth.classList.toggle('hidden', data.authenticated)
 
         lucide.createIcons()
+      }
+
+      function renderWarnings(list) {
+        const box = document.getElementById('warnings')
+        if (!list.length) {
+          box.classList.add('hidden')
+          box.innerHTML = ''
+          return
+        }
+        box.classList.remove('hidden')
+        box.innerHTML = list
+          .map((w) => {
+            const icon = w.severity === 'error' ? 'alert-octagon' : 'alert-triangle'
+            return `<div class="warning-item ${w.severity}">
+              <i data-lucide="${icon}"></i>
+              <div>
+                <div class="msg">${escapeHtml(w.message)}</div>
+                <div class="fix">${escapeHtml(w.remediation)}</div>
+              </div>
+            </div>`
+          })
+          .join('')
+      }
+
+      function escapeHtml(s) {
+        return String(s)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
       }
 
       async function refreshStatus() {

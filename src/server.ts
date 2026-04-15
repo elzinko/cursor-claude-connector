@@ -10,6 +10,11 @@ import { printStatusline } from './utils/statusline'
 import { statsRouter } from './routes/stats'
 import { statusRouter } from './routes/status'
 import { isApiKeyConfigured, validateApiKey } from './middleware/require-api-key'
+import {
+  getDeploymentInfo,
+  getDeploymentWarnings,
+  getEffectiveStorageMode,
+} from './utils/deployment-check'
 import { stream } from 'hono/streaming'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -195,11 +200,21 @@ app.post('/auth/logout', async (c: Context) => {
 })
 
 app.get('/auth/status', async (c: Context) => {
+  const info = getDeploymentInfo()
+  const warnings = getDeploymentWarnings()
+  const deployment = {
+    platform: info.platform,
+    vercelEnv: info.vercelEnv,
+    region: info.region,
+    warnings,
+  }
+
   try {
     const metadata = await getTokenMetadata()
     return c.json({
       ...metadata,
       apiKeyConfigured: isApiKeyConfigured(),
+      deployment,
     })
   } catch (error) {
     return c.json({
@@ -207,8 +222,9 @@ app.get('/auth/status', async (c: Context) => {
       expiresAt: null,
       expiresInSeconds: null,
       hasRefreshToken: false,
-      storageMode: 'redis' as const,
+      storageMode: getEffectiveStorageMode(),
       apiKeyConfigured: isApiKeyConfigured(),
+      deployment,
     })
   }
 })
