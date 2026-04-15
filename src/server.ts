@@ -507,11 +507,7 @@ const messagesFn = async (c: Context) => {
   // (assistant with tool_calls → tool_use blocks, tool role → tool_result)
   if (body.messages) {
     const convertedMessages: any[] = []
-    for (const rawMsg of body.messages) {
-      // OpenAI 2025 introduced `role: "developer"` as a replacement for
-      // `system` on newer models. Anthropic only accepts `system`, so
-      // normalize here before any downstream handling.
-      const msg = rawMsg.role === 'developer' ? { ...rawMsg, role: 'system' } : rawMsg
+    for (const msg of body.messages) {
       if (msg.role === 'assistant' && msg.tool_calls) {
         const content: any[] = []
         if (msg.content) {
