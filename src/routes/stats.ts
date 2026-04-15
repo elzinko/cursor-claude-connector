@@ -1,8 +1,11 @@
 import { Hono } from 'hono'
 import { logger } from '../middleware/request-logger'
 import { rateLimiter } from '../middleware/rate-limiter'
+import { requireApiKey } from './../middleware/require-api-key'
 
 export const statsRouter = new Hono()
+
+statsRouter.use('*', requireApiKey)
 
 // GET /stats - Get usage statistics
 statsRouter.get('/', (c) => {

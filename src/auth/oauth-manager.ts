@@ -152,4 +152,36 @@ async function getAccessToken(): Promise<string | null> {
   return null
 }
 
-export { get, set, remove, getAll, getAccessToken }
+export interface TokenMetadata {
+  authenticated: boolean
+  expiresAt: string | null
+  expiresInSeconds: number | null
+  hasRefreshToken: boolean
+  storageMode: 'file' | 'redis'
+}
+
+async function getTokenMetadata(): Promise<TokenMetadata> {
+  const credentials = await get()
+  const storageMode: 'file' | 'redis' = useFileStorage ? 'file' : 'redis'
+
+  if (!credentials || credentials.type !== 'oauth' || !credentials.access) {
+    return {
+      authenticated: false,
+      expiresAt: null,
+      expiresInSeconds: null,
+      hasRefreshToken: false,
+      storageMode,
+    }
+  }
+
+  const expiresInMs = credentials.expires - Date.now()
+  return {
+    authenticated: expiresInMs > 0 || !!credentials.refresh,
+    expiresAt: new Date(credentials.expires).toISOString(),
+    expiresInSeconds: Math.max(0, Math.floor(expiresInMs / 1000)),
+    hasRefreshToken: !!credentials.refresh,
+    storageMode,
+  }
+}
+
+export { get, set, remove, getAll, getAccessToken, getTokenMetadata }
