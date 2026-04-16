@@ -11,6 +11,9 @@
     "start:vercel": "./start.sh vercel",
     "start:dev": "tsx watch --env-file=.env src/server.ts",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "provision:vercel": "bash scripts/provision-vercel-env.sh",
     "clean": "rm -rf dist",
     "stop": "lsof -ti:9095 | xargs kill 2>/dev/null || echo 'No process on port 9095'",
     "vercel-build": "npm run build"
@@ -39,7 +42,8 @@
     "@types/bun": "^1.2.18",
     "@types/node": "^20.0.0",
     "tsx": "^4.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^2.1.0"
   },
   "engines": {
     "node": ">=18.0.0"

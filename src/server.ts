@@ -37,6 +37,9 @@ import {
   processChunk,
   convertNonStreamingResponse,
 } from './utils/anthropic-to-openai-converter'
+import { convertMessages } from './utils/convert-messages'
+import { buildAnthropicBetas } from './utils/anthropic-betas'
+import { sanitizeBodyForAnthropic } from './utils/sanitize-body'
 import { corsPreflightHandler, corsMiddleware } from './utils/cors-bypass'
 import {
   isCursorKeyCheck,
@@ -421,24 +424,6 @@ function mapModelName(model: string): string {
   return model
 }
 
-// Anthropic Messages API only accepts these top-level fields.
-// Any extra fields (from OpenAI format) cause a 400 error.
-const ANTHROPIC_ALLOWED_FIELDS = new Set([
-  'model', 'messages', 'system', 'max_tokens', 'metadata',
-  'stop_sequences', 'stream', 'temperature', 'top_p', 'top_k',
-  'tools', 'tool_choice', 'thinking',
-])
-
-function sanitizeBodyForAnthropic(body: Record<string, unknown>): Record<string, unknown> {
-  const clean: Record<string, unknown> = {}
-  for (const key of Object.keys(body)) {
-    if (ANTHROPIC_ALLOWED_FIELDS.has(key)) {
-      clean[key] = body[key]
-    }
-  }
-  return clean
-}
-
 const messagesFn = async (c: Context) => {
   const startTime = Date.now()
   const body: AnthropicRequestBody = await c.req.json()
@@ -541,53 +526,8 @@ const messagesFn = async (c: Context) => {
     })
   }
 
-  // ── Convert OpenAI-format messages to Anthropic format ─────────────
-  // (assistant with tool_calls → tool_use blocks, tool role → tool_result)
   if (body.messages) {
-    const convertedMessages: any[] = []
-    for (const rawMsg of body.messages) {
-      // OpenAI 2025 introduced `role: "developer"` as a replacement for
-      // `system` on newer models. Anthropic only accepts `system`, so
-      // normalize here before any downstream handling.
-      const msg = rawMsg.role === 'developer' ? { ...rawMsg, role: 'system' } : rawMsg
-      if (msg.role === 'assistant' && msg.tool_calls) {
-        const content: any[] = []
-        if (msg.content) {
-          if (typeof msg.content === 'string') {
-            content.push({ type: 'text', text: msg.content })
-          } else if (Array.isArray(msg.content)) {
-            // Already in Anthropic block format (e.g. openclaw sends
-            // [{type:"text", text:"..."}]). Pass blocks through as-is —
-            // double-wrapping them under another {type:"text", text: […]}
-            // makes Anthropic reject with "text.text: Input should be a valid string".
-            content.push(...msg.content)
-          }
-        }
-        for (const tc of msg.tool_calls) {
-          content.push({
-            type: 'tool_use',
-            id: tc.id,
-            name: tc.function?.name || '',
-            input: typeof tc.function?.arguments === 'string'
-              ? JSON.parse(tc.function.arguments || '{}')
-              : (tc.function?.arguments || {}),
-          })
-        }
-        convertedMessages.push({ role: 'assistant', content })
-      } else if (msg.role === 'tool') {
-        convertedMessages.push({
-          role: 'user',
-          content: [{
-            type: 'tool_result',
-            tool_use_id: msg.tool_call_id,
-            content: msg.content || '',
-          }],
-        })
-      } else {
-        convertedMessages.push(msg)
-      }
-    }
-    body.messages = convertedMessages
+    body.messages = convertMessages(body.messages as any) as any
   }
 
   try {
@@ -666,27 +606,17 @@ const messagesFn = async (c: Context) => {
     // significantly improves routing success rate through Cursor's backend
     const routingGroup = c.req.header('x-routing-group')
 
-    // Build the anthropic-beta header dynamically.
     // The 1M context window beta for Sonnet triggers Anthropic's
     // "Extra usage is required for long context requests" rate limit on
     // accounts that haven't enabled long-context billing — even for tiny
     // requests. Gate it behind an opt-in env var so the proxy stays usable
     // by default; users who've enabled long-context on their Anthropic
     // plan can set ENABLE_1M_CONTEXT=true to get back the 1M window.
-    const anthropicBetas = [
-      'oauth-2025-04-20',
-      'fine-grained-tool-streaming-2025-05-14',
-    ]
-    // interleaved-thinking beta only matters when thinking is enabled
-    if (body.thinking) {
-      anthropicBetas.push('interleaved-thinking-2025-05-14')
-    }
-    if (
-      process.env.ENABLE_1M_CONTEXT === 'true' &&
-      body.model.toLowerCase().includes('sonnet')
-    ) {
-      anthropicBetas.push('context-1m-2025-08-07')
-    }
+    const anthropicBetas = buildAnthropicBetas({
+      thinking: Boolean(body.thinking),
+      model: body.model,
+      enable1M: process.env.ENABLE_1M_CONTEXT === 'true',
+    })
 
     const headers: Record<string, string> = {
       'content-type': 'application/json',
