@@ -1,0 +1,66 @@
+name: PR tests
+
+# Two jobs:
+#   - `unit` runs vitest on every push/PR. Runs from the branch's workflow
+#     definition, so edits to tests/ or the workflow itself are validated
+#     on the very PR that introduces them.
+#   - `preview-integration` runs our live curl suite against the Vercel
+#     preview once Vercel reports the deployment as successful. `deployment_status`
+#     always uses the default branch's workflow, so this job only kicks in
+#     for PRs opened *after* the workflow has merged to main.
+#
+# Required repository secrets:
+#   - API_KEY                : same value as the Vercel API_KEY env var
+#                              (the proxy's own auth middleware reads it).
+#   - VERCEL_BYPASS_TOKEN    : Vercel → Project Settings → Deployment
+#                              Protection → "Protection Bypass for
+#                              Automation" token. Bypasses the SSO page
+#                              that fronts preview deployments.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  deployment_status:
+
+jobs:
+  unit:
+    name: Unit tests + typecheck
+    if: github.event_name != 'deployment_status'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  preview-integration:
+    name: Proxy integration tests (preview)
+    # Only react to successful Vercel Preview deployments. Skip Production
+    # (we don't want PR CI to hit prod) and skip intermediate states
+    # (pending, in_progress, failure).
+    if: >-
+      github.event_name == 'deployment_status' &&
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment.environment == 'Preview'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout deployed commit
+        uses: actions/checkout@v4
+        with:
+          # Pin to the exact commit Vercel deployed, not the branch tip
+          # (branch may have moved while the preview was building).
+          ref: ${{ github.event.deployment.sha }}
+
+      - name: Run integration tests against preview
+        env:
+          BASE_URL: ${{ github.event.deployment_status.environment_url }}/v1
+          API_KEY: ${{ secrets.API_KEY }}
+          VERCEL_BYPASS_TOKEN: ${{ secrets.VERCEL_BYPASS_TOKEN }}
+        run: bash tests/integration-tests.sh
