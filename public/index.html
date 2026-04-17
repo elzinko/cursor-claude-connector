@@ -826,10 +826,12 @@
           const btn = c.revoked
             ? `<button class="button-ghost" onclick="unrevokeClient('${c.fingerprint}')"><i data-lucide="rotate-ccw" style="width:12px;height:12px;"></i> Unrevoke</button>`
             : `<button class="button-danger" onclick="revokeClient('${c.fingerprint}')"><i data-lucide="ban" style="width:12px;height:12px;"></i> Revoke</button>`
+          const host = formatHost(c)
           return `<tr>
             <td class="mono">${escapeHtml(c.fingerprint.slice(0, 8))}</td>
             <td class="mono">${escapeHtml(c.ip || '—')}</td>
             <td>${flag} ${escapeHtml(c.country || '—')}</td>
+            <td>${host}</td>
             <td><span class="client-ua">${escapeHtml(c.uaParsed || 'unknown')}</span></td>
             <td class="mono opt">${escapeHtml(c.apiKeySuffix || '—')}</td>
             <td class="opt">${escapeHtml(formatRelative(c.firstSeen))}</td>
@@ -848,6 +850,7 @@
                 <th>FP</th>
                 <th>IP</th>
                 <th>Country</th>
+                <th>Host / ASN</th>
                 <th>UA</th>
                 <th class="opt">Key</th>
                 <th class="opt">First</th>
@@ -861,6 +864,36 @@
             </table>
           </div>`
         lucide.createIcons()
+      }
+
+      // Build the "Host / ASN" cell. The server pre-computes `hostLabel`
+      // so we just render it; fall back to ASN/PTR if it's missing (older
+      // records from before this feature was deployed).
+      function formatHost(c) {
+        if (c.hostLabel) {
+          const tooltip = [c.asnOrg, c.ptr, c.asn ? 'AS' + c.asn : null]
+            .filter(Boolean)
+            .join(' · ')
+          const tag = hostTag(c.netType)
+          return `<span title="${escapeHtml(tooltip)}">${escapeHtml(c.hostLabel)}</span>${tag}`
+        }
+        if (c.asn || c.asnOrg) {
+          const label = c.asnOrg || ('AS' + c.asn)
+          return `<span>${escapeHtml(label)}</span>`
+        }
+        return '<span style="color: hsl(var(--muted-foreground));">—</span>'
+      }
+
+      function hostTag(netType) {
+        if (!netType || netType === 'unknown') return ''
+        const colors = {
+          hosting: 'hsl(var(--destructive))',
+          mobile: 'hsl(var(--primary))',
+          business: 'hsl(var(--primary))',
+          residential: 'hsl(var(--success))',
+        }
+        const c = colors[netType] || 'hsl(var(--muted-foreground))'
+        return ` <span style="font-size: 0.6875rem; color: ${c}; margin-left: 0.25rem;">·&nbsp;${escapeHtml(netType)}</span>`
       }
 
       function renderUsageChart(daily, clientsMap) {

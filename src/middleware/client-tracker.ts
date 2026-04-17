@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto'
 import { Redis } from '@upstash/redis'
 import type { Context } from 'hono'
+import {
+  EMPTY_PROVENANCE,
+  lookupProvenance,
+  type NetType,
+  type ProvenanceData,
+} from './ip-provenance'
 
 // ── Redis wiring (same env vars as oauth-manager) ────────────────────
 const redisUrl = process.env.UPSTASH_REDIS_REST_URL?.trim()
@@ -35,6 +41,13 @@ export interface ClientRecord {
   tokensOut: number
   blocked: number
   revoked?: boolean
+  // IP provenance (nullable — filled opportunistically, absent on pre-upgrade
+  // records). See src/middleware/ip-provenance.ts for how these are derived.
+  asn?: number | null
+  asnOrg?: string | null
+  netType?: NetType
+  ptr?: string | null
+  hostLabel?: string | null
 }
 
 export interface DailyCounters {
@@ -102,6 +115,17 @@ export function fingerprint(apiKey: string, ip: string): string {
 
 function todayKey(): string {
   return new Date().toISOString().slice(0, 10)
+}
+
+// Merge a fresh provenance lookup into a ClientRecord in place. We overwrite
+// only when the new value is non-null — this preserves previously-resolved
+// data if a transient lookup failure returns the EMPTY_PROVENANCE sentinel.
+function applyProvenance(rec: ClientRecord, p: ProvenanceData): void {
+  if (p.asn != null) rec.asn = p.asn
+  if (p.asnOrg != null) rec.asnOrg = p.asnOrg
+  if (p.netType && p.netType !== 'unknown') rec.netType = p.netType
+  if (p.ptr != null) rec.ptr = p.ptr
+  if (p.hostLabel != null) rec.hostLabel = p.hostLabel
 }
 
 // Upstash returns hash fields either as pre-parsed objects or raw strings
@@ -189,6 +213,16 @@ async function trackRequest(input: TrackInput): Promise<void> {
   const tokInDelta = input.blocked ? 0 : input.tokensIn
   const tokOutDelta = input.blocked ? 0 : input.tokensOut
 
+  // Provenance enrichment — safe to call on every request (cache-backed,
+  // short timeout, never throws). If the lookup fails or is disabled, we
+  // get EMPTY_PROVENANCE and carry on.
+  let provenance: ProvenanceData = EMPTY_PROVENANCE
+  try {
+    provenance = await lookupProvenance(input.ip, input.country)
+  } catch (err) {
+    console.error('[client-tracker] lookupProvenance failed:', err)
+  }
+
   if (!redis) {
     // In-memory path
     const existing = memClients.get(input.fingerprint)
@@ -201,6 +235,7 @@ async function trackRequest(input: TrackInput): Promise<void> {
       existing.tokensIn += tokInDelta
       existing.tokensOut += tokOutDelta
       existing.blocked += blockDelta
+      applyProvenance(existing, provenance)
     } else {
       memClients.set(input.fingerprint, {
         fingerprint: input.fingerprint,
@@ -216,6 +251,11 @@ async function trackRequest(input: TrackInput): Promise<void> {
         tokensOut: tokOutDelta,
         blocked: blockDelta,
         revoked: memRevoked.has(input.fingerprint),
+        asn: provenance.asn,
+        asnOrg: provenance.asnOrg,
+        netType: provenance.netType,
+        ptr: provenance.ptr,
+        hostLabel: provenance.hostLabel,
       })
     }
     let dayMap = memDaily.get(day)
@@ -268,6 +308,7 @@ async function trackRequest(input: TrackInput): Promise<void> {
           tokensOut: tokOutDelta,
           blocked: blockDelta,
         }
+    applyProvenance(rec, provenance)
     await redis.hset(K_CLIENTS, {
       [input.fingerprint]: JSON.stringify(rec),
     })
