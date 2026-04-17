@@ -106,6 +106,16 @@ if [[ "${auth_ok}" == "false" ]]; then
   echo ">>> Pour un test complet : ${ROOT_URL}/ → « Connect with Claude »."
   echo ""
 fi
+
+# SMOKE_ONLY=1 (utilisé par le job prod-smoke) : on skip tous les appels
+# Claude (tests 2, 3, 4, 5-bis) pour ne pas brûler de quota OAuth ni
+# polluer le client tracking prod. Restent /auth/status, /v1/models,
+# /api/clients — suffisant pour détecter un drift d'env vars.
+SMOKE_ONLY="${SMOKE_ONLY:-0}"
+if [[ "${SMOKE_ONLY}" == "1" ]]; then
+  echo ">>> SMOKE_ONLY=1 : skip tests 2, 3, 4, 5-bis (appels Claude)."
+  echo ""
+fi
 echo ""
 
 echo "== 1) GET /v1/models =="
@@ -128,6 +138,10 @@ else
 fi
 echo ""
 
+if [[ "${SMOKE_ONLY}" == "1" ]]; then
+  echo "== 2) POST /v1/chat/completions — SKIPPED (SMOKE_ONLY) =="
+  echo ""
+else
 echo "== 2) POST /v1/chat/completions (non stream) =="
 chat_http=$(curl -sS ${BYPASS_ARGS[@]+"${BYPASS_ARGS[@]}"} -o "${chat_tmp}" -w "%{http_code}" \
   -H "Authorization: Bearer ${API_KEY}" \
@@ -181,6 +195,7 @@ else
   echo ""
 fi
 echo ""
+fi
 
 # Tests 3/4/5-bis need a working OAuth session to do real Claude calls.
 # Without one they all return the same 401 and add no signal beyond test 2.
@@ -200,7 +215,7 @@ fi
 pr3_tmp=$(mktemp)
 trap 'rm -f "${models_tmp}" "${chat_tmp}" "${pr3_tmp}"' EXIT
 
-if [[ "${NO_OAUTH_MODE}" != "1" ]]; then
+if [[ "${NO_OAUTH_MODE}" != "1" && "${SMOKE_ONLY}" != "1" ]]; then
   echo "== 3) developer → system role normalization (PR #3) =="
   dev_http=$(curl -sS ${BYPASS_ARGS[@]+"${BYPASS_ARGS[@]}"} -o "${pr3_tmp}" -w "%{http_code}" \
     -H "Authorization: Bearer ${API_KEY}" \

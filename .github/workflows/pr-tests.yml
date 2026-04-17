@@ -1,6 +1,6 @@
 name: PR tests
 
-# Two jobs:
+# Three jobs:
 #   - `unit` runs vitest on every push/PR. Runs from the branch's workflow
 #     definition, so edits to tests/ or the workflow itself are validated
 #     on the very PR that introduces them.
@@ -8,6 +8,10 @@ name: PR tests
 #     preview once Vercel reports the deployment as successful. `deployment_status`
 #     always uses the default branch's workflow, so this job only kicks in
 #     for PRs opened *after* the workflow has merged to main.
+#   - `prod-smoke` runs a subset of the curl suite (no Claude calls) against
+#     the Production deployment once a main→prod deploy succeeds. Catches
+#     env-var drift between Preview and Production without burning OAuth
+#     quota or polluting the production client-tracking KV.
 #
 # Required repository secrets:
 #   - API_KEY                : same value as the Vercel API_KEY env var
@@ -63,4 +67,29 @@ jobs:
           BASE_URL: ${{ github.event.deployment_status.environment_url }}/v1
           API_KEY: ${{ secrets.API_KEY }}
           VERCEL_BYPASS_TOKEN: ${{ secrets.VERCEL_BYPASS_TOKEN }}
+        run: bash tests/integration-tests.sh
+
+  prod-smoke:
+    name: Proxy smoke tests (production)
+    # Only react to successful Vercel Production deployments. Runs the
+    # same script with SMOKE_ONLY=1 so Claude-calling tests are skipped
+    # (auth/status, /v1/models, /api/clients only). This catches prod
+    # env-var drift without consuming OAuth quota.
+    if: >-
+      github.event_name == 'deployment_status' &&
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment.environment == 'Production'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout deployed commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.deployment.sha }}
+
+      - name: Run smoke tests against production
+        env:
+          BASE_URL: ${{ github.event.deployment_status.environment_url }}/v1
+          API_KEY: ${{ secrets.API_KEY }}
+          SMOKE_ONLY: '1'
         run: bash tests/integration-tests.sh
