@@ -728,6 +728,70 @@ const messagesFn = async (c: Context) => {
       console.error('[DEBUG-BODY] log failed:', (dbgErr as Error).message)
     }
 
+    // TEMPORARY DEBUG — echo the sanitized [DEBUG-BODY]/[DEBUG-HEADERS] values
+    // back to the caller as response headers, so a curl from CI/EC2 can see
+    // them without having to read Vercel runtime logs. Triple-gated:
+    //   1. opt-in per request via `x-debug-trace: 1` header
+    //   2. refused outside preview/development (VERCEL_ENV !== 'production')
+    //   3. content is already sanitized (no OAuth tokens, no API_KEY, messages
+    //      truncated to 50 chars, system to 120 chars, tools count only).
+    // Remove with the rest of the debug commits once the 14+ tools diagnosis
+    // lands.
+    const debugTraceRequested = c.req.header('x-debug-trace') === '1'
+    const debugTraceAllowed =
+      debugTraceRequested && process.env.VERCEL_ENV !== 'production'
+    if (debugTraceAllowed) {
+      try {
+        const dbgSystemEcho = Array.isArray((cleanBody as any).system)
+          ? `[${(cleanBody as any).system.length} blocks, first=${JSON.stringify(
+              (cleanBody as any).system[0],
+            )?.substring(0, 120)}]`
+          : typeof (cleanBody as any).system === 'string'
+            ? `[string len=${((cleanBody as any).system as string).length}]`
+            : undefined
+        const dbgBodyEcho = {
+          model: (cleanBody as any).model,
+          has_thinking: 'thinking' in (cleanBody as any),
+          thinking: (cleanBody as any).thinking ?? null,
+          system: dbgSystemEcho,
+          max_tokens: (cleanBody as any).max_tokens,
+          tools_count: Array.isArray((cleanBody as any).tools)
+            ? (cleanBody as any).tools.length
+            : 0,
+          tool_choice: (cleanBody as any).tool_choice ?? null,
+          stream: Boolean((cleanBody as any).stream),
+          temperature: (cleanBody as any).temperature ?? null,
+          top_p: (cleanBody as any).top_p ?? null,
+          top_k: (cleanBody as any).top_k ?? null,
+          messages_count: Array.isArray((cleanBody as any).messages)
+            ? (cleanBody as any).messages.length
+            : 0,
+          messages_roles: Array.isArray((cleanBody as any).messages)
+            ? (cleanBody as any).messages.map((m: any) => m?.role)
+            : [],
+          top_level_keys: Object.keys(cleanBody as any),
+        }
+        const dbgHeadersEcho = {
+          'anthropic-beta': headers['anthropic-beta'],
+          'anthropic-version': headers['anthropic-version'],
+          'user-agent': headers['user-agent'],
+          'x-routing-group': headers['x-routing-group'] ?? null,
+          accept: headers.accept,
+        }
+        // Hono header values must be single-line ASCII-safe. JSON.stringify
+        // produces that. Cap at 4KB to stay well under Vercel's 32KB limit.
+        const bodyJson = JSON.stringify(dbgBodyEcho).slice(0, 4096)
+        const headersJson = JSON.stringify(dbgHeadersEcho).slice(0, 2048)
+        c.header('x-debug-body', bodyJson)
+        c.header('x-debug-headers', headersJson)
+      } catch (dbgErr) {
+        c.header(
+          'x-debug-error',
+          (dbgErr as Error).message.slice(0, 200),
+        )
+      }
+    }
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers,
