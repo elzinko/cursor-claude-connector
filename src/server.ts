@@ -25,7 +25,11 @@ import {
 import { stream } from 'hono/streaming'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { getAccessToken, getTokenMetadata } from './auth/oauth-manager'
+import {
+  getAccessToken,
+  getTokenMetadata,
+  redactUpstashError,
+} from './auth/oauth-manager'
 import {
   login as oauthLogin,
   logout as oauthLogout,
@@ -164,10 +168,19 @@ app.post('/auth/oauth/callback', async (c: Context) => {
       message: 'OAuth authentication successful',
     })
   } catch (error) {
+    // Never propagate (error as Error).message here: it may contain the
+    // Upstash "command was: [...]" payload (access + refresh tokens) or the
+    // raw Anthropic response body. Log sanitized server-side, return fixed
+    // message to the client. See oauth-manager.redactUpstashError.
+    console.error(
+      'OAuth callback failed:',
+      redactUpstashError(error as Error),
+    )
     return c.json<ErrorResponse>(
       {
         error: 'OAuth callback failed',
-        message: (error as Error).message,
+        message:
+          'Unable to persist OAuth credentials. Check server logs and Redis configuration.',
       },
       500,
     )
@@ -190,8 +203,14 @@ app.post('/auth/login/start', async (c: Context) => {
       )
     }
   } catch (error) {
+    // Same leak risk as /auth/oauth/callback — oauthLogin -> startAuthFlow ->
+    // exchangeCodeForTokens -> authManager.set. Sanitize.
+    console.error(
+      'OAuth login failed:',
+      redactUpstashError(error as Error),
+    )
     return c.json<SuccessResponse>(
-      { success: false, message: (error as Error).message },
+      { success: false, message: 'OAuth login failed. See server logs.' },
       500,
     )
   }
@@ -205,8 +224,13 @@ app.post('/auth/logout', async (c: Context) => {
       message: 'Logged out successfully',
     })
   } catch (error) {
+    // oauthLogout -> authManager.remove can also throw a redis-shaped error.
+    console.error(
+      'OAuth logout failed:',
+      redactUpstashError(error as Error),
+    )
     return c.json<SuccessResponse>(
-      { success: false, message: (error as Error).message },
+      { success: false, message: 'OAuth logout failed. See server logs.' },
       500,
     )
   }
