@@ -668,6 +668,66 @@ const messagesFn = async (c: Context) => {
 
     console.log(`[PROXY] -> Anthropic: model=${cleanBody.model} max_tokens=${cleanBody.max_tokens} transform=${transformToOpenAIFormat}`)
 
+    // TEMPORARY DEBUG — diagnose 'out of extra usage' on 14+ tools. Remove after diagnosis.
+    try {
+      const dbgMessages = Array.isArray((cleanBody as any).messages)
+        ? (cleanBody as any).messages.map((m: any) => ({
+            role: m?.role,
+            content:
+              typeof m?.content === 'string'
+                ? m.content.substring(0, 50) + (m.content.length > 50 ? '...' : '')
+                : Array.isArray(m?.content)
+                  ? `[${m.content.length} blocks]`
+                  : m?.content,
+          }))
+        : undefined
+      const dbgSystem = Array.isArray((cleanBody as any).system)
+        ? `[${(cleanBody as any).system.length} blocks, first=${JSON.stringify(
+            (cleanBody as any).system[0],
+          )?.substring(0, 120)}...]`
+        : typeof (cleanBody as any).system === 'string'
+          ? `[string, first=${((cleanBody as any).system as string).substring(0, 120)}...]`
+          : (cleanBody as any).system
+      console.log(
+        '[DEBUG-BODY]',
+        JSON.stringify({
+          model: (cleanBody as any).model,
+          thinking: (cleanBody as any).thinking,
+          has_thinking: 'thinking' in (cleanBody as any),
+          system: dbgSystem,
+          max_tokens: (cleanBody as any).max_tokens,
+          tools_count: Array.isArray((cleanBody as any).tools)
+            ? (cleanBody as any).tools.length
+            : undefined,
+          tool_choice: (cleanBody as any).tool_choice,
+          stream: (cleanBody as any).stream,
+          temperature: (cleanBody as any).temperature,
+          top_p: (cleanBody as any).top_p,
+          top_k: (cleanBody as any).top_k,
+          messages_count: Array.isArray((cleanBody as any).messages)
+            ? (cleanBody as any).messages.length
+            : undefined,
+          messages_roles: Array.isArray((cleanBody as any).messages)
+            ? (cleanBody as any).messages.map((m: any) => m?.role)
+            : undefined,
+          messages_preview: dbgMessages,
+          top_level_keys: Object.keys(cleanBody as any),
+        }),
+      )
+      console.log(
+        '[DEBUG-HEADERS]',
+        JSON.stringify({
+          'anthropic-beta': headers['anthropic-beta'],
+          'anthropic-version': headers['anthropic-version'],
+          'user-agent': headers['user-agent'],
+          'x-routing-group': headers['x-routing-group'],
+          accept: headers.accept,
+        }),
+      )
+    } catch (dbgErr) {
+      console.error('[DEBUG-BODY] log failed:', (dbgErr as Error).message)
+    }
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers,
