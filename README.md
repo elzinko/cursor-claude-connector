@@ -59,6 +59,19 @@ Open your Vercel URL in a browser and click **"Connect with Claude"**. Sign in w
 - `API_KEY` required on public deployments
 - Tokens stored in Redis (Vercel) or local file (local mode)
 
+### Clients dashboard (`/api/clients`)
+
+The dashboard surfaces one row per `sha256(api_key + ip)` so you can spot
+unauthorized use of your key. To make this easier, the **Host / ASN** column
+resolves each IP to its provider — e.g. `AWS eu-west-3`, `Azure`,
+`SFR (FR, residential)` — so you can tell a home ISP apart from a cloud runner
+at a glance.
+
+Set `IPINFO_TOKEN` (free tier at [ipinfo.io](https://ipinfo.io), 50k
+lookups/month) in your Vercel env to enable. Lookups are cached in Upstash for
+30 days, so a busy proxy still does ~1 API call per unique client IP per
+month. Without the token the feature degrades gracefully (column stays empty).
+
 ## License
 
 MIT — Not affiliated with Anthropic or Cursor.
