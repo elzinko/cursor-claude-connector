@@ -118,7 +118,14 @@ jobs:
 
       - name: Run smoke tests against production
         env:
-          BASE_URL: ${{ github.event.deployment_status.environment_url }}/v1
+          # Use the stable public production alias, NOT the per-deploy URL
+          # that `github.event.deployment_status.environment_url` yields.
+          # Per-deploy URLs (e.g. `...-mpjpqhx1b.vercel.app`) sit behind
+          # Vercel Deployment Protection even for production — the script
+          # detects the SSO challenge and bails. The aliased URL is the
+          # one Cursor and other real clients hit, so it's the correct
+          # target for a smoke test anyway.
+          BASE_URL: https://elzinko-cursor-claude-connector.vercel.app/v1
           API_KEY: ${{ secrets.API_KEY }}
           SMOKE_ONLY: '1'
         run: bash tests/integration-tests.sh
