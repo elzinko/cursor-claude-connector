@@ -668,75 +668,15 @@ const messagesFn = async (c: Context) => {
 
     console.log(`[PROXY] -> Anthropic: model=${cleanBody.model} max_tokens=${cleanBody.max_tokens} transform=${transformToOpenAIFormat}`)
 
-    // TEMPORARY DEBUG — diagnose 'out of extra usage' on 14+ tools. Remove after diagnosis.
-    try {
-      const dbgMessages = Array.isArray((cleanBody as any).messages)
-        ? (cleanBody as any).messages.map((m: any) => ({
-            role: m?.role,
-            content:
-              typeof m?.content === 'string'
-                ? m.content.substring(0, 50) + (m.content.length > 50 ? '...' : '')
-                : Array.isArray(m?.content)
-                  ? `[${m.content.length} blocks]`
-                  : m?.content,
-          }))
-        : undefined
-      const dbgSystem = Array.isArray((cleanBody as any).system)
-        ? `[${(cleanBody as any).system.length} blocks, first=${JSON.stringify(
-            (cleanBody as any).system[0],
-          )?.substring(0, 120)}...]`
-        : typeof (cleanBody as any).system === 'string'
-          ? `[string, first=${((cleanBody as any).system as string).substring(0, 120)}...]`
-          : (cleanBody as any).system
-      console.log(
-        '[DEBUG-BODY]',
-        JSON.stringify({
-          model: (cleanBody as any).model,
-          thinking: (cleanBody as any).thinking,
-          has_thinking: 'thinking' in (cleanBody as any),
-          system: dbgSystem,
-          max_tokens: (cleanBody as any).max_tokens,
-          tools_count: Array.isArray((cleanBody as any).tools)
-            ? (cleanBody as any).tools.length
-            : undefined,
-          tool_choice: (cleanBody as any).tool_choice,
-          stream: (cleanBody as any).stream,
-          temperature: (cleanBody as any).temperature,
-          top_p: (cleanBody as any).top_p,
-          top_k: (cleanBody as any).top_k,
-          messages_count: Array.isArray((cleanBody as any).messages)
-            ? (cleanBody as any).messages.length
-            : undefined,
-          messages_roles: Array.isArray((cleanBody as any).messages)
-            ? (cleanBody as any).messages.map((m: any) => m?.role)
-            : undefined,
-          messages_preview: dbgMessages,
-          top_level_keys: Object.keys(cleanBody as any),
-        }),
-      )
-      console.log(
-        '[DEBUG-HEADERS]',
-        JSON.stringify({
-          'anthropic-beta': headers['anthropic-beta'],
-          'anthropic-version': headers['anthropic-version'],
-          'user-agent': headers['user-agent'],
-          'x-routing-group': headers['x-routing-group'],
-          accept: headers.accept,
-        }),
-      )
-    } catch (dbgErr) {
-      console.error('[DEBUG-BODY] log failed:', (dbgErr as Error).message)
-    }
-
-    // TEMPORARY DEBUG — echo the sanitized [DEBUG-BODY]/[DEBUG-HEADERS] values
-    // back to the caller as response headers, so a curl from CI/EC2 can see
-    // them without having to read Vercel runtime logs. Triple-gated:
+    // Opt-in diagnostic: when the caller sends `x-debug-trace: 1` on a
+    // non-production deployment, echo the sanitized outgoing body + Anthropic
+    // headers back as response headers. Useful from a preview-scoped curl to
+    // confirm what actually goes on the wire without reading Vercel runtime
+    // logs. Triple-gated:
     //   1. opt-in per request via `x-debug-trace: 1` header
     //   2. refused outside preview/development (VERCEL_ENV !== 'production')
     //   3. content is already sanitized (no OAuth tokens, no API_KEY, messages
     //      truncated to 50 chars, system to 120 chars, tools count only).
-    // Remove with the rest of the debug commits once the 14+ tools diagnosis
-    // lands.
     const debugTraceRequested = c.req.header('x-debug-trace') === '1'
     const debugTraceAllowed =
       debugTraceRequested && process.env.VERCEL_ENV !== 'production'

@@ -64,16 +64,3 @@ jobs:
           API_KEY: ${{ secrets.API_KEY }}
           VERCEL_BYPASS_TOKEN: ${{ secrets.VERCEL_BYPASS_TOKEN }}
         run: bash tests/integration-tests.sh
-
-      # Temporary — fires two probes (13 tools expected 200, 22 tools expected
-      # 400 "out of extra usage") and prints ISO-8601 timestamps so we can
-      # later scope a Vercel runtime-log query to the exact probe windows.
-      # Non-blocking (the script always exits 0). Delete once the debug
-      # commit in src/server.ts is reverted.
-      - name: Debug tools probe (13 vs 22)
-        if: always()
-        env:
-          BASE_URL: ${{ github.event.deployment_status.environment_url }}/v1
-          API_KEY: ${{ secrets.API_KEY }}
-          VERCEL_BYPASS_TOKEN: ${{ secrets.VERCEL_BYPASS_TOKEN }}
-        run: bash tests/debug-tools-probe.sh
