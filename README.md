@@ -44,6 +44,55 @@ Open your Vercel URL in a browser and click **"Connect with Claude"**. Sign in w
 
 ---
 
+## Prompt caching
+
+The proxy automatically places Anthropic `cache_control: {type: "ephemeral"}` breakpoints on the stable parts of each request:
+
+- one marker on the **last block of `system`** (caches tools + system together)
+- one marker on the **last tool** (partial hit if only system text changes)
+
+Repeat calls with the same tools + system then hit the prompt cache at ~10% of the input price. For large clients like openclaw (22 KB system + 23 KB tools) this covers the majority of input tokens — the savings compound every turn.
+
+**Verifying cache activity** — the proxy propagates Anthropic's counters both in response headers and in the OpenAI-compat response body:
+
+```bash
+curl -sS -D - -H "Authorization: Bearer $API_KEY" \
+     -d @payload.json "$PROXY_URL/v1/chat/completions" | head -20
+
+# Response headers of interest:
+#   x-cache-control-injected: 2          ← bp count the proxy placed
+#   x-cache-control-system:   1          ← marked the last system block
+#   x-cache-control-tools:    1          ← marked the last tool
+#   x-anthropic-cache-creation: 5120     ← tokens written this call (~1.25× rate)
+#   x-anthropic-cache-read:     0        ← first call, nothing to read
+
+# Response body carries the same numbers for OpenAI-compat clients:
+#   "usage": {
+#     "prompt_tokens": 5170,
+#     "completion_tokens": 10,
+#     "total_tokens": 5180,
+#     "prompt_tokens_details": {
+#       "cached_tokens": 0,
+#       "cache_creation_tokens": 5120
+#     }
+#   }
+```
+
+Replaying the same curl 200 ms later should flip `cache_creation` to 0 and `cache_read`/`cached_tokens` to the same 5120. If `cached_tokens` stays at 0 across two identical requests, a silent invalidator is at work (timestamp in the system prompt, non-deterministic JSON key order, varying tool set). See [`shared/prompt-caching.md`](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching) for the audit checklist.
+
+**Respecting the client** — if the client already placed its own `cache_control` anywhere in `system`, `tools`, or message blocks, the proxy leaves the corresponding section alone (`x-cache-control-skip-reason: client_owns_system` or `client_owns_tools`). Max 4 breakpoints per request; the proxy never pushes the total over 4.
+
+**Escape hatches** (env vars, no code change):
+
+| Variable | Effect |
+|---|---|
+| `DISABLE_CACHE_CONTROL=1` | Skip injection entirely — use to rule out caching during an unrelated bug hunt |
+| `CACHE_TTL_1H=1` | Use the 1-hour TTL instead of the 5-minute default. Write cost goes from 1.25× to 2× of base — break-even needs ≥3 reads per write. Worth enabling only for long openclaw-style sessions where the 5-min default keeps expiring between turns. |
+
+**Streaming** — cache metrics arrive in the final `usage` chunk of the stream (same OpenAI-compat `prompt_tokens_details` shape). The response-header mirror is not populated for streaming responses because headers are flushed before usage numbers arrive from Anthropic.
+
+---
+
 ## Docs
 
 - [Deployment Guide](docs/DEPLOYMENT.md) — Vercel setup, Redis, environment variables

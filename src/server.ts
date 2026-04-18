@@ -43,6 +43,7 @@ import {
 } from './utils/anthropic-to-openai-converter'
 import { convertMessages } from './utils/convert-messages'
 import { buildAnthropicBetas } from './utils/anthropic-betas'
+import { injectCacheControl } from './utils/cache-control'
 import { sanitizeBodyForAnthropic } from './utils/sanitize-body'
 import { corsPreflightHandler, corsMiddleware } from './utils/cors-bypass'
 import {
@@ -663,10 +664,48 @@ const messagesFn = async (c: Context) => {
       }
     }
 
+    // Inject prompt-cache breakpoints on the stable parts of the prefix
+    // (last system block + last tool) so repeat calls hit Anthropic's
+    // prompt cache at ~10% of input price instead of the full rate.
+    //
+    // Runs AFTER the Claude Code marker injection above on purpose — the
+    // marker has to be part of the cached prefix, not appended after the
+    // breakpoint, or the hash would never match between two calls.
+    //
+    // Escape hatches (env vars, no code changes required):
+    //   DISABLE_CACHE_CONTROL=1   → skip injection entirely
+    //   CACHE_TTL_1H=1            → use 1h TTL (2× write cost, needs ≥3
+    //                                 reads per write to pay off; only worth
+    //                                 enabling for long openclaw-style
+    //                                 sessions where the 5-min default
+    //                                 keeps expiring between turns).
+    const cacheResult = injectCacheControl(body as Record<string, unknown>, {
+      disabled: process.env.DISABLE_CACHE_CONTROL === '1',
+      ttl1h: process.env.CACHE_TTL_1H === '1',
+    })
+
     // Remove OpenAI-only fields that Anthropic doesn't understand (causes 400)
     const cleanBody = sanitizeBodyForAnthropic(body as Record<string, unknown>)
 
-    console.log(`[PROXY] -> Anthropic: model=${cleanBody.model} max_tokens=${cleanBody.max_tokens} transform=${transformToOpenAIFormat}`)
+    console.log(
+      `[PROXY] -> Anthropic: model=${cleanBody.model} max_tokens=${cleanBody.max_tokens} ` +
+        `transform=${transformToOpenAIFormat} ` +
+        `cache=${cacheResult.injected ? `${cacheResult.addedBreakpoints}bp(sys=${cacheResult.systemBlockMarked},tools=${cacheResult.toolMarked})` : `off(${cacheResult.skipReason ?? 'no-op'})`}`,
+    )
+
+    // Expose the cache-injection decision as response headers so a caller
+    // running `curl -D` can tell, independent of Anthropic's response body,
+    // whether the proxy placed a breakpoint. Useful for debugging "why is
+    // my cache hit rate low?" without needing x-debug-trace.
+    c.header(
+      'x-cache-control-injected',
+      String(cacheResult.addedBreakpoints),
+    )
+    if (cacheResult.skipReason) {
+      c.header('x-cache-control-skip-reason', cacheResult.skipReason)
+    }
+    if (cacheResult.systemBlockMarked) c.header('x-cache-control-system', '1')
+    if (cacheResult.toolMarked) c.header('x-cache-control-tools', '1')
 
     // Opt-in diagnostic: when the caller sends `x-debug-trace: 1` on a
     // non-production deployment, echo the sanitized outgoing body + Anthropic
@@ -874,6 +913,29 @@ const messagesFn = async (c: Context) => {
         tokensOut: responseData.usage?.output_tokens || 0,
         blocked: false,
       })
+
+      // Expose Anthropic's cache token counters as response headers. The
+      // OpenAI-compat body also carries them under
+      // `usage.prompt_tokens_details`, but a header is the cheapest way to
+      // inspect cache behavior with `curl -D` while eyeballing the stream.
+      // Only meaningful for non-streaming responses — in streaming, the
+      // headers are flushed before the usage numbers arrive from Anthropic,
+      // so clients should read the final OpenAI `usage` chunk instead.
+      const anthropicUsage = responseData.usage
+      if (anthropicUsage) {
+        c.header(
+          'x-anthropic-cache-creation',
+          String(anthropicUsage.cache_creation_input_tokens || 0),
+        )
+        c.header(
+          'x-anthropic-cache-read',
+          String(anthropicUsage.cache_read_input_tokens || 0),
+        )
+        c.header(
+          'x-anthropic-input-tokens',
+          String(anthropicUsage.input_tokens || 0),
+        )
+      }
 
       if (transformToOpenAIFormat) {
         const openAIResponse = convertNonStreamingResponse(responseData)
