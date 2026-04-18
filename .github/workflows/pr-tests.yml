@@ -62,12 +62,41 @@ jobs:
           # (branch may have moved while the preview was building).
           ref: ${{ github.event.deployment.sha }}
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
       - name: Run integration tests against preview
         env:
           BASE_URL: ${{ github.event.deployment_status.environment_url }}/v1
           API_KEY: ${{ secrets.API_KEY }}
           VERCEL_BYPASS_TOKEN: ${{ secrets.VERCEL_BYPASS_TOKEN }}
         run: bash tests/integration-tests.sh
+
+      # Two-call live regression for the prompt-caching feature (see
+      # tests/live/cache-hit.test.ts). Burns a small amount of real OAuth
+      # quota on every preview — the payload uses Haiku + ~5 KB filler to
+      # clear the 4096-token cacheable-prefix minimum while keeping cost
+      # close to the noise floor. Runs after the main integration suite
+      # so auth/bypass/env-var failures surface there first.
+      #
+      # Non-blocking on its own failure: the signal we actually care about
+      # is `cache_read_input_tokens > 0` on call 2, and we want the job
+      # log for diagnosis even when the assertion fails. Hence
+      # `continue-on-error: true` — but the step still shows red in the
+      # PR checks summary, so a regression is visible.
+      - name: Cache-hit live regression (two-call pattern)
+        if: always()
+        continue-on-error: true
+        env:
+          PROXY_URL: ${{ github.event.deployment_status.environment_url }}
+          PROBE_API_KEY: ${{ secrets.API_KEY }}
+          PROBE_BYPASS_TOKEN: ${{ secrets.VERCEL_BYPASS_TOKEN }}
+          LIVE_TESTS: '1'
+        run: |
+          npm ci
+          npm run test:live
 
   prod-smoke:
     name: Proxy smoke tests (production)
