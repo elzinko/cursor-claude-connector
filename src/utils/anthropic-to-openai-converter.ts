@@ -79,10 +79,27 @@ interface OpenAIStreamChunk {
     }
     finish_reason: string | null
   }>
-  usage?: {
-    prompt_tokens: number
-    completion_tokens: number
-    total_tokens: number
+  usage?: OpenAIUsage
+}
+
+// OpenAI's usage shape, extended to carry Anthropic's cache metrics.
+// `prompt_tokens_details.cached_tokens` is the OpenAI-native field for
+// "tokens served from a cache hit" — openai/types exposes it for their own
+// cache, and OpenAI-compat clients (openclaw, Cursor) read it. Mapping
+// Anthropic's `cache_read_input_tokens` into it keeps clients vendor-neutral.
+//
+// `cache_creation_tokens` is a non-standard passthrough of
+// `cache_creation_input_tokens`: useful for diagnostics but won't be read
+// by generic OpenAI clients. We still emit it — it's cheap, it lives under
+// `prompt_tokens_details` which OpenAI tolerates for extras, and it's the
+// only way a caller can tell a first-write from an uncached miss.
+interface OpenAIUsage {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  prompt_tokens_details?: {
+    cached_tokens: number
+    cache_creation_tokens?: number
   }
 }
 
@@ -107,11 +124,7 @@ interface OpenAIResponse {
     }
     finish_reason: string | null
   }>
-  usage: {
-    prompt_tokens: number
-    completion_tokens: number
-    total_tokens: number
-  }
+  usage: OpenAIUsage
 }
 
 // Internal types
@@ -193,13 +206,14 @@ export function convertNonStreamingResponse(
             : anthropicResponse.stop_reason || null,
       },
     ],
-    usage: {
-      prompt_tokens: anthropicResponse.usage?.input_tokens || 0,
-      completion_tokens: anthropicResponse.usage?.output_tokens || 0,
-      total_tokens:
-        (anthropicResponse.usage?.input_tokens || 0) +
-        (anthropicResponse.usage?.output_tokens || 0),
-    },
+    usage: buildOpenAIUsage({
+      input_tokens: anthropicResponse.usage?.input_tokens || 0,
+      output_tokens: anthropicResponse.usage?.output_tokens || 0,
+      cache_creation_input_tokens:
+        anthropicResponse.usage?.cache_creation_input_tokens || 0,
+      cache_read_input_tokens:
+        anthropicResponse.usage?.cache_read_input_tokens || 0,
+    }),
   }
 
   // Process content blocks
@@ -401,12 +415,52 @@ function updateMetrics(
   }
 }
 
+// Map Anthropic's token accounting to OpenAI's shape.
+//
+// Semantic gotcha: Anthropic reports `input_tokens` as the UNCACHED
+// remainder only — cached bytes are reported separately. OpenAI's
+// `prompt_tokens` is the TOTAL input (cached + uncached). So
+// `prompt_tokens = input_tokens + cache_creation + cache_read`.
+// A client that reads only `prompt_tokens` sees the full cost; a client
+// that reads `prompt_tokens_details.cached_tokens` can tell how much was
+// billed at the ~0.1× cached rate.
+export function buildOpenAIUsage(anthropicUsage: {
+  input_tokens: number
+  output_tokens: number
+  cache_creation_input_tokens?: number
+  cache_read_input_tokens?: number
+}): OpenAIUsage {
+  const input = anthropicUsage.input_tokens || 0
+  const cacheCreate = anthropicUsage.cache_creation_input_tokens || 0
+  const cacheRead = anthropicUsage.cache_read_input_tokens || 0
+  const output = anthropicUsage.output_tokens || 0
+  const totalPrompt = input + cacheCreate + cacheRead
+
+  const usage: OpenAIUsage = {
+    prompt_tokens: totalPrompt,
+    completion_tokens: output,
+    total_tokens: totalPrompt + output,
+  }
+  // Only attach the `prompt_tokens_details` block when there's actually
+  // cache activity. Clients that ignore the field don't get unexpected
+  // shape changes on uncached requests.
+  if (cacheCreate > 0 || cacheRead > 0) {
+    usage.prompt_tokens_details = {
+      cached_tokens: cacheRead,
+      cache_creation_tokens: cacheCreate,
+    }
+  }
+  return usage
+}
+
 // Create usage chunk for OpenAI format
 function createUsageChunk(state: ConverterState): OpenAIStreamChunk | null {
   // Only send usage if we have token data
   if (
     state.metricsData.input_tokens === 0 &&
-    state.metricsData.output_tokens === 0
+    state.metricsData.output_tokens === 0 &&
+    state.metricsData.cache_creation_input_tokens === 0 &&
+    state.metricsData.cache_read_input_tokens === 0
   ) {
     return null
   }
@@ -423,12 +477,13 @@ function createUsageChunk(state: ConverterState): OpenAIStreamChunk | null {
         finish_reason: null,
       },
     ],
-    usage: {
-      prompt_tokens: state.metricsData.input_tokens,
-      completion_tokens: state.metricsData.output_tokens,
-      total_tokens:
-        state.metricsData.input_tokens + state.metricsData.output_tokens,
-    },
+    usage: buildOpenAIUsage({
+      input_tokens: state.metricsData.input_tokens,
+      output_tokens: state.metricsData.output_tokens,
+      cache_creation_input_tokens:
+        state.metricsData.cache_creation_input_tokens,
+      cache_read_input_tokens: state.metricsData.cache_read_input_tokens,
+    }),
   }
 }
 

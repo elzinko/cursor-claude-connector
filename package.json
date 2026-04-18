@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:live": "LIVE_TESTS=1 vitest run",
     "provision:vercel": "bash scripts/provision-vercel-env.sh",
     "clean": "rm -rf dist",
     "stop": "lsof -ti:9095 | xargs kill 2>/dev/null || echo 'No process on port 9095'",
