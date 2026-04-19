@@ -44,6 +44,7 @@ import {
 import { convertMessages } from './utils/convert-messages'
 import { buildAnthropicBetas } from './utils/anthropic-betas'
 import { injectCacheControl } from './utils/cache-control'
+import { compactSystem } from './utils/compact-system'
 import { sanitizeBodyForAnthropic } from './utils/sanitize-body'
 import { corsPreflightHandler, corsMiddleware } from './utils/cors-bypass'
 import {
@@ -664,6 +665,22 @@ const messagesFn = async (c: Context) => {
       }
     }
 
+    // Heuristic system-prompt compaction — opt-in via COMPACT_SYSTEM=1.
+    // Runs BEFORE injectCacheControl so the cache_control breakpoint sits
+    // on the *final* (compacted) system text and the prompt-cache hash
+    // stays stable across repeat calls. Inverting the order would move
+    // the breakpoint onto text that still mutates, defeating PR #8.
+    //
+    // Native Claude Code requests are never touched: transformToOpenAIFormat
+    // is true exactly when the proxy had to inject the "You are Claude Code"
+    // marker (because it wasn't already in system[0]) — so
+    // !transformToOpenAIFormat signals origin = Claude Code native, which
+    // must stay bit-for-bit intact for the plan-side routing.
+    const compactResult = compactSystem(body as Record<string, unknown>, {
+      enabled: process.env.COMPACT_SYSTEM === '1',
+      isClaudeCodeOrigin: !transformToOpenAIFormat,
+    })
+
     // Inject prompt-cache breakpoints on the stable parts of the prefix
     // (last system block + last tool) so repeat calls hit Anthropic's
     // prompt cache at ~10% of input price instead of the full rate.
@@ -690,7 +707,8 @@ const messagesFn = async (c: Context) => {
     console.log(
       `[PROXY] -> Anthropic: model=${cleanBody.model} max_tokens=${cleanBody.max_tokens} ` +
         `transform=${transformToOpenAIFormat} ` +
-        `cache=${cacheResult.injected ? `${cacheResult.addedBreakpoints}bp(sys=${cacheResult.systemBlockMarked},tools=${cacheResult.toolMarked})` : `off(${cacheResult.skipReason ?? 'no-op'})`}`,
+        `cache=${cacheResult.injected ? `${cacheResult.addedBreakpoints}bp(sys=${cacheResult.systemBlockMarked},tools=${cacheResult.toolMarked})` : `off(${cacheResult.skipReason ?? 'no-op'})`} ` +
+        `compact=${compactResult.compacted ? `${compactResult.originalChars}->${compactResult.newChars}(${compactResult.sectionsTouched}s)` : `off(${compactResult.skipReason ?? 'no-op'})`}`,
     )
 
     // Expose the cache-injection decision as response headers so a caller
@@ -706,6 +724,25 @@ const messagesFn = async (c: Context) => {
     }
     if (cacheResult.systemBlockMarked) c.header('x-cache-control-system', '1')
     if (cacheResult.toolMarked) c.header('x-cache-control-tools', '1')
+
+    // Expose the compaction decision symmetrically with x-cache-control-*.
+    // Format `<originalChars>-><newChars>` is ASCII-only on purpose (Hono
+    // sanitizes header values and a Unicode arrow might get dropped or
+    // re-encoded depending on the downstream proxy); swap to `→` later if
+    // empirically safe in the target environment.
+    if (compactResult.compacted) {
+      c.header(
+        'x-system-compacted',
+        `${compactResult.originalChars}->${compactResult.newChars}`,
+      )
+      c.header(
+        'x-system-compacted-sections',
+        String(compactResult.sectionsTouched),
+      )
+    }
+    if (compactResult.skipReason) {
+      c.header('x-system-compacted-skip', compactResult.skipReason)
+    }
 
     // Opt-in diagnostic: when the caller sends `x-debug-trace: 1` on a
     // non-production deployment, echo the sanitized outgoing body + Anthropic
